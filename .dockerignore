@@ -1,0 +1,9 @@
+node_modules
+data
+dist
+release
+docs
+.git
+.gitignore
+*.log
+README.md

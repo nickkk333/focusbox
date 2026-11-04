@@ -1,0 +1,17 @@
+{
+  "name": "focusbox",
+  "version": "1.0.0",
+  "private": true,
+  "description": "专注盒子 —— 集备忘录、番茄钟与任务管理于一体的自托管效率工具",
+  "main": "server/index.js",
+  "scripts": {
+    "start": "node server/index.js",
+    "dev": "node --watch server/index.js"
+  },
+  "engines": {
+    "node": ">=24"
+  },
+  "dependencies": {
+    "express": "^4.21.2"
+  }
+}

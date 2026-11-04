@@ -1,0 +1,28 @@
+services:
+  focusbox:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: focusbox:1.0.0
+    container_name: focusbox
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    environment:
+      TZ: Asia/Shanghai
+    volumes:
+      - focusbox-data:/data
+    healthcheck:
+      test:
+        - CMD
+        - node
+        - -e
+        - "fetch('http://127.0.0.1:3000/api/health').then(r => r.ok ? r.json() : Promise.reject(new Error('HTTP ' + r.status))).then(d => process.exit(d.status === 'ok' ? 0 : 1)).catch(() => process.exit(1))"
+      interval: 30s
+      timeout: 5s
+      start_period: 10s
+      retries: 3
+
+volumes:
+  focusbox-data:
+    name: focusbox-data

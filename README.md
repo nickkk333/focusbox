@@ -1,0 +1,288 @@
+# 专注盒子 FocusBox
+
+一个把 **备忘录**、**番茄钟** 与 **任务清单** 放在一起的中文自托管效率工具。它参考了 [Pomotroid](https://github.com/Splode/pomotroid)、[Memos](https://github.com/usememos/memos) 与 [Super Productivity](https://github.com/super-productivity/super-productivity) 的核心体验，适合部署在自己的电脑、NAS 或家庭服务器上。
+
+所有数据保存在本地 SQLite 数据库中，不依赖外部服务、CDN 或云账号。界面与提示语均为简体中文。
+
+![专注盒子界面预览](docs/screenshot.png)
+
+> 上图使用示例数据展示，首次启动时只会包含三个默认项目与一条欢迎备忘。
+
+## 功能特性
+
+### 今日工作台
+- 今日专注时长、完成番茄数、完成任务数、连续专注天数与逾期任务概览
+- 今日到期任务快速勾选完成，或直接开始一次专注
+- 快速添加今日任务
+- 随手记备忘，支持 `Ctrl + Enter` 快捷保存
+- 最近备忘预览与置顶标记
+
+### 任务清单
+- 项目分类（内置「工作 / 生活 / 学习」，可自行增删改）
+- 优先级、截止日期、预计时长、备注
+- 子任务拆分与勾选
+- 手动记录投入时间，自动汇总番茄专注时长
+- 按状态、项目、优先级筛选，支持关键词搜索
+- 任务详情抽屉内即时编辑，自动保存
+
+### 番茄钟
+- 专注 / 短休息 / 长休息三种模式
+- 自定义专注时长、休息时长与长休息间隔
+- 每日专注目标与进度环
+- 自动开始休息 / 自动开始下一轮专注
+- 完成提示音与桌面通知
+- 计时状态写入 `localStorage`，刷新页面后可恢复
+- 完成或提前结束的专注会记录到服务端，并同步到任务与统计
+
+### 备忘
+- Markdown 渲染：标题、加粗、斜体、删除线、高亮、行内代码、代码块、引用、列表、任务列表、链接
+- `#标签` 自动提取与聚合
+- 搜索、按标签筛选、置顶、归档、编辑与删除
+- 首页最近备忘直达编辑
+
+### 统计
+- 最近 7 / 30 / 90 天专注趋势
+- 专注热力图
+- 任务完成概览
+- 项目时间分布
+- 日均专注、最佳一天、活跃天数、新增备忘等洞察
+
+### 设置与数据
+- 主题：浅色 / 深色 / 跟随系统
+- 番茄钟参数与通知开关
+- JSON 全量导出 / 导入
+- 一键恢复初始示例数据
+- 数据持久化到 Docker 卷
+
+## 技术栈
+
+| 层次 | 技术 |
+| --- | --- |
+| 运行时 | Node.js 24+ |
+| Web 框架 | Express 4 |
+| 数据库 | Node.js 内置 `node:sqlite`（SQLite） |
+| 前端 | 原生 ES Modules + 手写 CSS，无构建步骤、无 CDN |
+| 部署 | Docker / Docker Compose |
+
+## 快速开始
+
+### 方式一：Docker Compose（推荐）
+
+```bash
+docker compose up -d --build
+```
+
+打开 <http://localhost:3000>。
+
+停止服务：
+
+```bash
+docker compose down
+```
+
+数据保存在命名卷 `focusbox-data` 中，`docker compose down` 不会删除数据。若需连同数据一起删除：
+
+```bash
+docker compose down -v
+```
+
+### 方式二：直接使用 Docker 命令
+
+```bash
+docker build -t focusbox:1.0.0 .
+docker run -d \
+  --name focusbox \
+  -p 3000:3000 \
+  -v focusbox-data:/data \
+  --restart unless-stopped \
+  focusbox:1.0.0
+```
+
+### 方式三：使用已导出的镜像文件
+
+如果当前目录的 `release/` 下已有 `focusbox-1.0.0.tar`：
+
+```bash
+docker load -i release/focusbox-1.0.0.tar
+docker run -d \
+  --name focusbox \
+  -p 3000:3000 \
+  -v focusbox-data:/data \
+  --restart unless-stopped \
+  focusbox:1.0.0
+```
+
+### 方式四：本地开发运行
+
+要求 Node.js **24 或更高版本**（使用内置 `node:sqlite`）。
+
+```bash
+npm ci
+npm start
+```
+
+开发模式（文件变更自动重启）：
+
+```bash
+npm run dev
+```
+
+默认地址：<http://localhost:3000>。本地数据写入项目下的 `data/focusbox.db`。
+
+## 配置项
+
+| 环境变量 | 默认值 | 说明 |
+| --- | --- | --- |
+| `PORT` | `3000` | HTTP 监听端口 |
+| `HOST` | `0.0.0.0` | HTTP 监听地址 |
+| `DATA_DIR` | 项目下 `data/` | 数据目录；Docker 镜像默认为 `/data` |
+| `DB_FILE` | `$DATA_DIR/focusbox.db` | 可单独指定 SQLite 文件路径 |
+| `TZ` | 系统时区 | 容器时区，例如 `Asia/Shanghai` |
+
+Compose 中修改端口示例：
+
+```yaml
+ports:
+  - "8080:3000"
+```
+
+## 数据持久化与备份
+
+### Docker 命名卷
+
+镜像将数据目录声明为 `/data`。使用命名卷时，数据库文件位于卷内的 `focusbox.db`。容器重建或升级不会影响数据。
+
+### 绑定挂载到宿主机
+
+```yaml
+volumes:
+  - ./data:/data
+```
+
+Linux 下如果遇到权限问题，可先让容器用户（UID 1000）拥有目录：
+
+```bash
+mkdir -p ./data
+sudo chown -R 1000:1000 ./data
+```
+
+### 应用内备份
+
+进入「设置 → 数据管理」：
+
+- **导出**：下载包含项目、任务、子任务、时间记录、备忘、番茄记录与设置的 JSON 文件
+- **导入**：覆盖现有数据并从备份恢复
+- **清空数据**：删除全部数据并恢复初始示例内容
+
+也可以直接访问 `GET /api/data/export` 下载备份。
+
+## 目录结构
+
+```text
+.
+├── Dockerfile
+├── docker-compose.yml
+├── LICENSE
+├── README.md
+├── package.json
+├── package-lock.json
+├── server/
+│   ├── index.js              # Express 入口、静态资源与错误处理
+│   ├── db.js                 # SQLite 表结构、设置与事务
+│   ├── seed.js               # 首次启动示例数据
+│   ├── utils.js              # 参数校验与数据映射
+│   └── routes/
+│       ├── projects.js       # 项目
+│       ├── tasks.js          # 任务、子任务、时间记录
+│       ├── memos.js          # 备忘与标签
+│       ├── sessions.js       # 番茄记录、统计、徽标
+│       ├── settings.js       # 设置
+│       └── data.js           # 导入、导出、重置
+└── public/
+    ├── index.html
+    ├── favicon.svg
+    ├── css/
+    │   ├── base.css          # 设计变量与通用组件
+    │   ├── layout.css        # 应用外壳与响应式布局
+    │   └── views.css         # 各业务视图
+    └── js/
+        ├── app.js            # 外壳、导航、主题、徽标
+        ├── router.js         # Hash 路由
+        ├── timer.js          # 番茄计时状态机
+        ├── markdown.js       # 安全的 Markdown 渲染
+        ├── components.js     # 弹窗、抽屉、Toast 等
+        ├── api.js
+        ├── utils.js
+        └── views/            # 今日、任务、番茄钟、备忘、统计、设置
+```
+
+## API 概览
+
+所有接口均返回 JSON，错误格式为 `{ "error": "中文错误信息" }`。
+
+| 方法 | 路径 | 说明 |
+| --- | --- | --- |
+| GET | `/api/health` | 健康检查 |
+| GET / POST | `/api/projects` | 项目列表 / 新建项目 |
+| PATCH / DELETE | `/api/projects/:id` | 更新 / 删除项目 |
+| GET | `/api/tasks` | 任务列表，支持 `status`、`projectId`、`priority`、`due`、`search`、`date` |
+| POST | `/api/tasks` | 新建任务 |
+| GET / PATCH / DELETE | `/api/tasks/:id` | 任务详情 / 更新 / 删除 |
+| POST | `/api/tasks/:id/toggle` | 切换完成状态 |
+| POST | `/api/tasks/:id/subtasks` | 新建子任务 |
+| PATCH / DELETE | `/api/tasks/subtasks/:id` | 更新 / 删除子任务 |
+| POST | `/api/tasks/:id/time` | 手动记录投入时间 |
+| DELETE | `/api/tasks/time/:id` | 删除时间记录 |
+| GET / POST | `/api/memos` | 备忘列表 / 新建备忘 |
+| GET | `/api/memos/tags` | 标签聚合 |
+| PATCH / DELETE | `/api/memos/:id` | 更新 / 删除备忘 |
+| GET / POST | `/api/sessions` | 番茄记录列表 / 新建记录 |
+| DELETE | `/api/sessions/:id` | 删除番茄记录 |
+| GET | `/api/stats` | 统计，支持 `days`、`date`、`tzOffset` |
+| GET | `/api/badges` | 侧栏徽标与今日专注摘要 |
+| GET / PATCH | `/api/settings` | 读取 / 更新设置 |
+| GET | `/api/data/export` | 导出 JSON 备份 |
+| POST | `/api/data/import` | 导入 JSON 备份 |
+| POST | `/api/data/reset` | 清空并恢复示例数据 |
+
+## 设计说明
+
+- **单用户、无登录**：这是面向个人自托管的工具，默认不包含账号体系。请勿直接暴露到公网；如需远程访问，请放在带身份认证的反向代理（如 Nginx、Caddy、Authelia）之后。
+- **计时在浏览器端运行**：刷新页面后通过 `localStorage` 恢复；关闭所有页面后计时不会在后台继续。专注完成后由浏览器向服务端写入记录。
+- **时区**：统计接口接收浏览器传入的 `tzOffset`，按本地日期聚合数据，避免跨时区导致「今天」错位。
+- **静态资源缓存**：服务端对静态文件使用 `no-cache` + ETag 协商缓存，升级镜像后刷新页面即可拿到新版本。
+
+## 常见问题
+
+**Q：页面一直停在启动画面？**  
+打开浏览器开发者工具查看控制台。若提示无法连接服务器，请确认容器状态与端口映射：`docker ps`、`docker logs focusbox`。
+
+**Q：桌面通知没有出现？**  
+浏览器通知通常要求 HTTPS 或 `localhost` 环境，并且需要用户授权。首次开启时请允许通知权限。
+
+**Q：如何升级？**
+
+```bash
+docker compose build --pull
+docker compose up -d
+```
+
+数据卷保持不变，升级后刷新浏览器即可。
+
+**Q：如何修改时区？**  
+在 `docker-compose.yml` 中调整 `TZ`，例如 `Asia/Shanghai`，然后重新启动容器。
+
+**Q：可以在 ARM 设备（如树莓派、部分 NAS）上运行吗？**  
+可以。`node:24-alpine` 提供多架构镜像，在目标设备上执行 `docker build` 或使用对应架构的镜像即可。
+
+## 参考项目
+
+- [Pomotroid](https://github.com/Splode/pomotroid)：简洁的番茄钟体验与计时交互
+- [Memos](https://github.com/usememos/memos)：轻量、自托管的碎片化笔记
+- [Super Productivity](https://github.com/super-productivity/super-productivity)：任务、时间盒与工作流整合
+
+本项目为学习与自用目的独立实现，未复制上述项目的源代码。
+
+## 许可证
+
+[MIT](./LICENSE)
