@@ -90,27 +90,27 @@ docker compose down -v
 ### 方式二：直接使用 Docker 命令
 
 ```bash
-docker build -t focusbox:1.0.0 .
+docker build -t focusbox:1.0.1 .
 docker run -d \
   --name focusbox \
   -p 3000:3000 \
   -v focusbox-data:/data \
   --restart unless-stopped \
-  focusbox:1.0.0
+  focusbox:1.0.1
 ```
 
 ### 方式三：使用已导出的镜像文件
 
-如果当前目录的 `release/` 下已有 CI 导出的镜像 tar（例如 `focusbox-1.0.0-amd64.tar`）：
+如果当前目录的 `release/` 下已有 CI 导出的镜像 tar（例如 `focusbox-1.0.1-amd64.tar`）：
 
 ```bash
-docker load -i release/focusbox-1.0.0-amd64.tar
+docker load -i release/focusbox-1.0.1-amd64.tar
 docker run -d \
   --name focusbox \
   -p 3000:3000 \
   -v focusbox-data:/data \
   --restart unless-stopped \
-  focusbox:1.0.0
+  focusbox:1.0.1
 ```
 
 如需启用访问认证：
@@ -123,12 +123,12 @@ docker run -d \
   --restart unless-stopped \
   -e FOCUSBOX_USERNAME=admin \
   -e FOCUSBOX_PASSWORD=你的密码 \
-  focusbox:1.0.0
+  focusbox:1.0.1
 ```
 
 ### 方式四：飞牛 fnOS（.fpk 安装包）
 
-GitHub Actions 会同时产出离线镜像 tar 与飞牛安装包 `focusbox-fnos-<版本>.fpk`。安装包内已包含 amd64 / arm64 镜像，NAS 无需联网拉取。
+GitHub Actions 会构建多架构镜像并推送到 GHCR，同时产出轻量安装包 `focusbox-fnos-<版本>.fpk`。fpk 只包含生命周期脚本、向导和图标，不内置镜像；安装时会从 `ghcr.io/nickkk333/focusbox:<版本>` 拉取对应架构的镜像，因此安装包体积很小，但 NAS 需要能访问 `ghcr.io`。
 
 在飞牛应用中心 → 手动安装，选择 fpk。安装向导会要求填写：
 
@@ -139,6 +139,8 @@ GitHub Actions 会同时产出离线镜像 tar 与飞牛安装包 `focusbox-fnos
 数据目录固定为 `/vol1/@appshare/focusbox`，安装时无需选择。安装完成后可从飞牛桌面图标打开，或访问 `http://飞牛IP:8083`。
 
 > 安装包会创建名为 `focusbox` 的 Docker 容器，并通过安装向导填写的用户名、密码启用 HTTP Basic Auth。若需要公网访问，请在前面再加一层 HTTPS 反向代理。
+>
+> 首次发布后，请到 GitHub 仓库的 Packages 页面确认 `focusbox` 包可见性为 **Public**；否则 fnOS 无法匿名拉取镜像。工作流会尝试自动设置，若失败请手动修改。
 
 ### 方式五：本地开发运行
 
@@ -159,14 +161,14 @@ npm run dev
 
 ## GitHub Actions 构建与发布
 
-工作流位于 `.github/workflows/release.yml`。推送到 `main`、推送 `v1.2.3` 形式的 tag，或在 Actions 页面手动触发 `Build and Release`，都会构建并上传以下产物：
+工作流位于 `.github/workflows/release.yml`。推送到 `main`、推送 `v1.2.3` 形式的 tag，或在 Actions 页面手动触发 `Build and Release`，都会构建多架构镜像并推送到 GHCR，同时上传以下产物：
 
 - `focusbox-<版本>-amd64.tar`：amd64 Docker 镜像
 - `focusbox-<版本>-arm64.tar`：arm64 Docker 镜像
-- `focusbox-fnos-<版本>.fpk`：飞牛 fnOS 离线安装包（内含双架构镜像）
+- `focusbox-fnos-<版本>.fpk`：飞牛 fnOS 轻量安装包（安装时从 GHCR 拉取镜像）
 - `focusbox-fnos-<版本>.fpk.sha256`：安装包校验和
 
-tag 推送会自动创建 GitHub Release；手动触发时可勾选 `publish` 创建 Release。工作流还会启动 amd64 镜像做健康检查与访问认证冒烟测试。
+镜像地址为 `ghcr.io/nickkk333/focusbox:<版本>` 和 `ghcr.io/nickkk333/focusbox:latest`。tag 推送会自动创建 GitHub Release；手动触发时可勾选 `publish` 创建 Release。工作流还会启动 amd64 镜像做健康检查、数据目录权限与访问认证冒烟测试。
 
 ## 配置项
 
@@ -179,6 +181,9 @@ tag 推送会自动创建 GitHub Release；手动触发时可勾选 `publish` �
 | `FOCUSBOX_USERNAME` | 空 | 可选。设置后与密码一起启用 HTTP Basic Auth |
 | `FOCUSBOX_PASSWORD` | 空 | 可选。设置后与用户名一起启用 HTTP Basic Auth |
 | `FOCUSBOX_FRAME_ANCESTORS` | `'self'` | 允许嵌入页面的来源；飞牛安装包会设为 `'self' http: https:` |
+| `FOCUSBOX_DATA_DIR` | `/vol1/@appshare/focusbox` | 仅飞牛安装包使用，覆盖宿主机数据目录 |
+| `FOCUSBOX_IMAGE_REPO` | `ghcr.io/nickkk333/focusbox` | 仅飞牛安装包使用，覆盖镜像仓库 |
+| `FOCUSBOX_IMAGE` | 空 | 仅飞牛安装包使用，直接指定完整镜像名（优先级最高） |
 | `TZ` | 系统时区 | 容器时区，例如 `Asia/Shanghai` |
 
 Compose 中修改端口示例：
@@ -224,7 +229,7 @@ sudo chown -R 1000:1000 ./data
 .
 ├── .github/
 │   └── workflows/
-│       └── release.yml       # 构建镜像 tar、fnOS fpk 并发布
+│       └── release.yml       # 构建并推送镜像、打包 fnOS fpk 并发布
 ├── deploy/
 │   └── fnos/                 # 飞牛 fnOS 应用包源
 │       ├── manifest
@@ -234,6 +239,7 @@ sudo chown -R 1000:1000 ./data
 │       ├── app/ui/           # 桌面入口与图标
 │       └── build.sh          # 本地 / CI 打包脚本
 ├── Dockerfile
+├── docker-entrypoint.sh       # 修正 /data 权限后降权运行
 ├── docker-compose.yml
 ├── LICENSE
 ├── README.md
@@ -309,6 +315,9 @@ sudo chown -R 1000:1000 ./data
 
 **Q：页面一直停在启动画面？**  
 打开浏览器开发者工具查看控制台。若提示无法连接服务器，请确认容器状态与端口映射：`docker ps`、`docker logs focusbox`。
+
+**Q：启动时报 `unable to open database file`？**  
+容器入口会以 root 修正 `/data` 权限后降权到 `node` 运行。若仍出现该错误，请确认 `/vol1/@appshare/focusbox` 所在存储卷可写，并查看 `docker logs focusbox` 以及 `/var/apps/focusbox/var/focusbox-main.log`。
 
 **Q：桌面通知没有出现？**  
 浏览器通知通常要求 HTTPS 或 `localhost` 环境，并且需要用户授权。首次开启时请允许通知权限。

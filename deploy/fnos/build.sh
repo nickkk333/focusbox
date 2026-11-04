@@ -1,19 +1,15 @@
 #!/usr/bin/env bash
 #
-# 构建飞牛 fnOS 安装包（离线版）。
+# 构建飞牛 fnOS 安装包（轻量外壳，镜像从 GHCR 拉取）。
 #
 # 用法：
-#   ./deploy/fnos/build.sh <version> <amd64.tar> <arm64.tar> [输出目录]
+#   ./deploy/fnos/build.sh <version> [输出目录]
 #
 # 示例：
-#   ./deploy/fnos/build.sh 1.0.0 \
-#     release/focusbox-1.0.0-amd64.tar \
-#     release/focusbox-1.0.0-arm64.tar \
-#     release
+#   ./deploy/fnos/build.sh 1.0.1 release
 #
 # 依赖：
 #   - fnpack 1.2.3（https://static2.fnnas.com/fnpack/fnpack-1.2.3-linux-amd64）
-#   - 已用 docker save 导出的 amd64 / arm64 镜像 tar
 #
 # 脚本会在临时目录中组装，不会修改源目录里的 manifest 或 cmd 脚本。
 
@@ -21,9 +17,7 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 VERSION="${1:-${VERSION:-}}"
-AMD64_TAR="${2:-}"
-ARM64_TAR="${3:-}"
-OUT_DIR="${4:-${SCRIPT_DIR}/../../release}"
+OUT_DIR="${2:-${SCRIPT_DIR}/../../release}"
 FNPACK="${FNPACK_BIN:-fnpack}"
 
 die() {
@@ -32,15 +26,12 @@ die() {
 }
 
 if [ -z "$VERSION" ]; then
-  die "缺少版本号。用法：$0 <version> <amd64.tar> <arm64.tar> [输出目录]"
+  die "缺少版本号。用法：$0 <version> [输出目录]"
 fi
 
 if ! [[ "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
   die "版本号必须为 X.Y.Z（当前：$VERSION）"
 fi
-
-[ -f "$AMD64_TAR" ] || die "找不到 amd64 镜像 tar：$AMD64_TAR"
-[ -f "$ARM64_TAR" ] || die "找不到 arm64 镜像 tar：$ARM64_TAR"
 
 if ! command -v "$FNPACK" >/dev/null 2>&1; then
   die "找不到 fnpack。请安装 fnpack 1.2.3，或通过 FNPACK_BIN 指定路径。"
@@ -60,15 +51,12 @@ cp -a "$SCRIPT_DIR/." "$STAGE/"
 rm -f "$STAGE"/*.fpk 2>/dev/null || true
 # fnpack 会把 .DS_Store 一并打进包里，先清理掉。
 find "$STAGE" -name '.DS_Store' -delete 2>/dev/null || true
+# 旧版本可能残留内置镜像，绝不能打进轻量包。
 rm -rf "$STAGE/app/images"
-mkdir -p "$STAGE/app/images"
-
-cp "$AMD64_TAR" "$STAGE/app/images/focusbox-amd64.tar"
-cp "$ARM64_TAR" "$STAGE/app/images/focusbox-arm64.tar"
 
 # 写入版本号，并锁定 cmd/main 使用的镜像 tag。
 sed -i -E "s/^version=.*/version=${VERSION}/" "$STAGE/manifest"
-sed -i -E "s|^IMAGE_TAG=.*|IMAGE_TAG=\"${VERSION}\"|" "$STAGE/cmd/main"
+sed -i -E "s|^DEFAULT_IMAGE_TAG=.*|DEFAULT_IMAGE_TAG=\"${VERSION}\"|" "$STAGE/cmd/main"
 
 # Windows 工作区可能带 CRLF；fnOS 上的 #!/bin/bash\r 会报 bad interpreter。
 for f in "$STAGE"/cmd/* "$STAGE/manifest" "$STAGE"/config/* "$STAGE"/wizard/* "$STAGE"/app/ui/config; do

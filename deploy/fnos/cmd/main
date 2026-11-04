@@ -2,19 +2,21 @@
 #
 # 专注盒子 FocusBox - 飞牛 fnOS 生命周期脚本
 #
-# 本应用不使用 fnOS 的 docker-project 资源，而是由本脚本管理容器：
-# 安装包内自带 amd64 / arm64 镜像 tar，启动时按设备架构 docker load，
-# 因此 NAS 无需联网拉取镜像。脚本以 root 运行（需要访问 Docker）。
+# 本应用不使用 fnOS 的 docker-project 资源，而是由本脚本管理容器。
+# fpk 只是轻量外壳：安装时从 GHCR 拉取多架构镜像，启动时直接使用本地镜像。
+# 脚本以 root 运行（需要访问 Docker）。
 #
 # 退出码：0 = 成功/运行中，1 = 失败，3 = 未运行（仅 status）。
 
 set +e
 
 CONTAINER="${FOCUSBOX_CONTAINER:-focusbox}"
-APP_VERSION="${TRIM_APPVER:-1.0.0}"
-IMAGE_TAG="${FOCUSBOX_IMAGE_TAG:-$APP_VERSION}"
-IMAGE="focusbox:${IMAGE_TAG}"
-APP_DIR="${TRIM_APPDEST:-/var/apps/focusbox/target}"
+APP_VERSION="${TRIM_APPVER:-1.0.1}"
+# build.sh 会把 DEFAULT_IMAGE_TAG 改成实际版本；FOCUSBOX_IMAGE_TAG 可覆盖。
+DEFAULT_IMAGE_TAG="1.0.1"
+IMAGE_REPO="${FOCUSBOX_IMAGE_REPO:-ghcr.io/nickkk333/focusbox}"
+IMAGE_TAG="${FOCUSBOX_IMAGE_TAG:-$DEFAULT_IMAGE_TAG}"
+IMAGE="${FOCUSBOX_IMAGE:-${IMAGE_REPO}:${IMAGE_TAG}}"
 PKGVAR="${TRIM_PKGVAR:-/tmp}"
 LOG="${TRIM_TEMP_LOGFILE:-${PKGVAR}/focusbox.log}"
 MAIN_LOG="${PKGVAR}/focusbox-main.log"
@@ -50,50 +52,26 @@ normalize_port() {
   fi
 }
 
-detect_arch() {
-  local arch="${TRIM_SYS_ARCH:-}"
-  # 部分 fnOS 版本不注入 TRIM_SYS_ARCH，回退到 uname。
-  [ -n "$arch" ] || arch="$(uname -m 2>/dev/null)"
-  case "$arch" in
-    x86_64|amd64|x64|x86) echo amd64 ;;
-    aarch64|arm64|armv8*|arm) echo arm64 ;;
-    *) echo "" ;;
-  esac
-}
-
 ensure_image() {
-  local arch tar marker want rc
-  arch="$(detect_arch)"
-  if [ -z "$arch" ]; then
-    fail "不支持的 CPU 架构：${TRIM_SYS_ARCH:-未知}。请查看 ${MAIN_LOG}。"
-  fi
-
-  tar="${APP_DIR}/images/focusbox-${arch}.tar"
-  if [ ! -f "$tar" ]; then
-    # 手动安装或旧包升级时，本机可能已经存在镜像。
-    if docker image inspect "$IMAGE" >/dev/null 2>&1; then
-      return 0
-    fi
-    fail "未找到内置镜像 ${tar}，请重新安装完整的 fpk 包。"
-  fi
-
-  marker="${PKGVAR}/focusbox-image.marker"
-  want="$(stat -c '%s_%Y' "$tar" 2>/dev/null)"
-  if [ -n "$want" ] && [ -f "$marker" ] \
-     && [ "$(cat "$marker" 2>/dev/null)" = "$want" ] \
-     && docker image inspect "$IMAGE" >/dev/null 2>&1; then
+  local rc attempt
+  if docker image inspect "$IMAGE" >/dev/null 2>&1; then
     return 0
   fi
 
-  log "loading image: $tar"
-  docker load -i "$tar" >> "$MAIN_LOG" 2>&1
-  rc=$?
-  log "docker load exit=$rc"
-  if [ "$rc" -ne 0 ] || ! docker image inspect "$IMAGE" >/dev/null 2>&1; then
-    fail "镜像加载失败，请查看 ${MAIN_LOG}。"
-  fi
-  [ -n "$want" ] && echo "$want" > "$marker"
-  return 0
+  log "pulling image: $IMAGE"
+  attempt=1
+  while [ "$attempt" -le 3 ]; do
+    docker pull "$IMAGE" >> "$MAIN_LOG" 2>&1
+    rc=$?
+    log "docker pull attempt=${attempt} exit=${rc}"
+    if [ "$rc" -eq 0 ] && docker image inspect "$IMAGE" >/dev/null 2>&1; then
+      return 0
+    fi
+    attempt=$((attempt + 1))
+    sleep 5
+  done
+
+  fail "镜像下载失败：${IMAGE}。请确认 NAS 可以访问 ghcr.io、GHCR 包可见性为 Public，或先在 Docker 中手动拉取。"
 }
 
 prepare_data_dir() {
@@ -106,10 +84,13 @@ prepare_data_dir() {
   fi
 
   # 只在目录属主不正确时递归修正一次，避免每次启动都遍历数据。
+  # 飞牛共享目录使用 ACL，chown 失败时退化为放宽权限；容器入口还会再修正一次。
   local owner
   owner="$(stat -c '%u' "$DATA_HOST_DIR" 2>/dev/null)"
   if [ "$owner" != "$DATA_UID" ]; then
-    chown -R "$DATA_UID:$DATA_GID" "$DATA_HOST_DIR" 2>/dev/null || true
+    chown -R "$DATA_UID:$DATA_GID" "$DATA_HOST_DIR" 2>/dev/null \
+      || chmod -R a+rwX "$DATA_HOST_DIR" 2>/dev/null \
+      || true
   fi
 }
 
@@ -120,8 +101,15 @@ is_running() {
 normalize_port
 
 case "$1" in
+  pull)
+    log "=== pull === version=${APP_VERSION} image=${IMAGE}"
+    command -v docker >/dev/null 2>&1 || fail "未找到 docker 命令，请确认飞牛 Docker 服务已启用。"
+    ensure_image || exit 1
+    exit 0
+    ;;
+
   start)
-    log "=== start === version=${APP_VERSION} arch=${TRIM_SYS_ARCH:-unknown} port=${PORT} data=${DATA_HOST_DIR}"
+    log "=== start === version=${APP_VERSION} port=${PORT} data=${DATA_HOST_DIR} image=${IMAGE}"
 
     if is_running; then
       log "container already running"
@@ -141,6 +129,7 @@ case "$1" in
     export FOCUSBOX_PASSWORD="$APP_PASSWORD"
 
     log "docker run ${IMAGE} -> host port ${PORT}"
+    # 不指定 --user：镜像入口会以 root 修正 /data 属主，再降权到 node 运行。
     docker run -d \
       --name "$CONTAINER" \
       --restart unless-stopped \
@@ -153,7 +142,6 @@ case "$1" in
       -e FOCUSBOX_PASSWORD \
       -e "FOCUSBOX_FRAME_ANCESTORS='self' http: https:" \
       -v "${DATA_HOST_DIR}:/data" \
-      --user "${DATA_UID}:${DATA_GID}" \
       "$IMAGE" >> "$MAIN_LOG" 2>&1
     rc=$?
     log "docker run exit=$rc"

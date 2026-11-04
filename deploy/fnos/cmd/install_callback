@@ -1,4 +1,7 @@
 #!/bin/bash
-# 安装文件落盘后无需额外操作；镜像会在首次 start 时按架构加载。
+# 安装完成后立即从 GHCR 拉取镜像；失败则让安装失败并给出提示。
 set +e
-exit 0
+
+CMD_DIR="$(cd "$(dirname "$0")" && pwd)"
+"$CMD_DIR/main" pull
+exit $?

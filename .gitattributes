@@ -2,6 +2,7 @@
 
 # fnOS 生命周期脚本与包配置必须保持 LF，否则 NAS 上会出现 bad interpreter。
 *.sh text eol=lf
+docker-entrypoint.sh text eol=lf
 deploy/fnos/cmd/* text eol=lf
 deploy/fnos/manifest text eol=lf
 deploy/fnos/wizard/* text eol=lf

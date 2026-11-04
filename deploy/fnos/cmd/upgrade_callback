@@ -1,4 +1,7 @@
 #!/bin/bash
-# 升级完成后由 fnOS 重新调用 cmd/main start。
+# 升级后拉取新版本镜像，随后由 fnOS 调用 cmd/main start。
 set +e
-exit 0
+
+CMD_DIR="$(cd "$(dirname "$0")" && pwd)"
+"$CMD_DIR/main" pull
+exit $?

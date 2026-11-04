@@ -7,7 +7,16 @@ const { DatabaseSync } = require('node:sqlite');
 const DATA_DIR = process.env.DATA_DIR || path.join(__dirname, '..', 'data');
 const DB_FILE = process.env.DB_FILE || path.join(DATA_DIR, 'focusbox.db');
 
-fs.mkdirSync(path.dirname(DB_FILE), { recursive: true });
+const DB_DIR = path.dirname(DB_FILE);
+try {
+  fs.mkdirSync(DB_DIR, { recursive: true });
+  fs.accessSync(DB_DIR, fs.constants.W_OK);
+  if (fs.existsSync(DB_FILE)) fs.accessSync(DB_FILE, fs.constants.W_OK);
+} catch (error) {
+  console.error(`无法写入数据目录 ${DB_DIR}：${error.message}`);
+  console.error('请确认容器对 /data 有写权限，或检查挂载目录的属主。');
+  process.exit(1);
+}
 
 const db = new DatabaseSync(DB_FILE);
 

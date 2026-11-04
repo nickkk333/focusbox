@@ -9,9 +9,9 @@ on:
   workflow_dispatch:
     inputs:
       version:
-        description: '版本号（X.Y.Z，例如 1.0.0）'
+        description: '版本号（X.Y.Z，例如 1.0.1）'
         required: true
-        default: '1.0.0'
+        default: '1.0.1'
       publish:
         description: '是否创建 GitHub Release'
         type: boolean
@@ -19,10 +19,14 @@ on:
 
 permissions:
   contents: write
+  packages: write
+
+env:
+  IMAGE: ghcr.io/${{ github.repository }}
 
 jobs:
   build:
-    name: Build image tarballs and fnOS fpk
+    name: Build multi-arch image and fnOS fpk
     runs-on: ubuntu-latest
     timeout-minutes: 90
 
@@ -59,41 +63,98 @@ jobs:
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
-      - name: Build amd64 image
-        shell: bash
-        run: |
-          set -euo pipefail
-          VERSION="${{ steps.version.outputs.version }}"
-          docker buildx build \
-            --platform linux/amd64 \
-            --tag "focusbox:${VERSION}-amd64" \
-            --load \
-            .
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Build arm64 image
+      - name: Build and push multi-arch image
         shell: bash
         run: |
           set -euo pipefail
           VERSION="${{ steps.version.outputs.version }}"
+          IMAGE_LC="$(echo "$IMAGE" | tr '[:upper:]' '[:lower:]')"
+          TAGS=(--tag "${IMAGE_LC}:${VERSION}")
+          if [ "${GITHUB_REF_TYPE}" = "tag" ] || [ "${GITHUB_REF}" = "refs/heads/main" ]; then
+            TAGS+=(--tag "${IMAGE_LC}:latest")
+          fi
           docker buildx build \
-            --platform linux/arm64 \
-            --tag "focusbox:${VERSION}-arm64" \
-            --load \
-            .
+            --platform linux/amd64,linux/arm64 \
+            "${TAGS[@]}" \
+            --push .
+          echo "已推送镜像：${IMAGE_LC}:${VERSION}"
 
-      - name: Export image tarballs
+      # GHCR 包默认是私有的；尽力自动改为公开，失败时按 README 手动设置。
+      - name: Make GHCR package public
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          PACKAGE="${GITHUB_REPOSITORY#*/}"
+          gh api --method PATCH "/user/packages/container/${PACKAGE}" -f visibility=public
+
+      - name: Export amd64 image tarball
         shell: bash
         run: |
           set -euo pipefail
           VERSION="${{ steps.version.outputs.version }}"
+          IMAGE_LC="$(echo "$IMAGE" | tr '[:upper:]' '[:lower:]')"
           mkdir -p release
-          docker tag "focusbox:${VERSION}-amd64" "focusbox:${VERSION}"
+          docker pull --platform linux/amd64 "${IMAGE_LC}:${VERSION}"
+          docker tag "${IMAGE_LC}:${VERSION}" "focusbox:${VERSION}"
           docker save -o "release/focusbox-${VERSION}-amd64.tar" "focusbox:${VERSION}"
           docker rmi "focusbox:${VERSION}" >/dev/null
-          docker tag "focusbox:${VERSION}-arm64" "focusbox:${VERSION}"
+          ls -lh "release/focusbox-${VERSION}-amd64.tar"
+
+      - name: Smoke test image, permissions and authentication
+        shell: bash
+        run: |
+          set -euo pipefail
+          VERSION="${{ steps.version.outputs.version }}"
+          IMAGE_LC="$(echo "$IMAGE" | tr '[:upper:]' '[:lower:]')"
+          rm -rf .smoke-data
+          mkdir -p .smoke-data
+          # 故意保持 root/当前用户属主，验证入口脚本能修正 /data 权限。
+          docker run -d \
+            --name focusbox-smoke \
+            -p 18083:3000 \
+            -e FOCUSBOX_USERNAME=admin \
+            -e FOCUSBOX_PASSWORD=secret123 \
+            -v "$PWD/.smoke-data:/data" \
+            "${IMAGE_LC}:${VERSION}"
+          trap 'docker rm -f focusbox-smoke >/dev/null 2>&1 || true; sudo rm -rf .smoke-data' EXIT
+
+          for _ in $(seq 1 30); do
+            if curl -fsS http://127.0.0.1:18083/api/health >/dev/null 2>&1; then
+              break
+            fi
+            sleep 1
+          done
+
+          curl -fsS http://127.0.0.1:18083/api/health | grep -q '"status":"ok"'
+          test -f .smoke-data/focusbox.db
+
+          CODE="$(curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:18083/)"
+          [ "$CODE" = "401" ] || { echo "未认证访问应返回 401，实际为 $CODE" >&2; exit 1; }
+
+          CODE="$(curl -s -o /dev/null -w '%{http_code}' -u admin:secret123 http://127.0.0.1:18083/)"
+          [ "$CODE" = "200" ] || { echo "认证后访问应返回 200，实际为 $CODE" >&2; exit 1; }
+
+          echo "镜像、数据目录权限与访问认证冒烟测试通过。"
+
+      - name: Export arm64 image tarball
+        shell: bash
+        run: |
+          set -euo pipefail
+          VERSION="${{ steps.version.outputs.version }}"
+          IMAGE_LC="$(echo "$IMAGE" | tr '[:upper:]' '[:lower:]')"
+          docker pull --platform linux/arm64 "${IMAGE_LC}:${VERSION}"
+          docker tag "${IMAGE_LC}:${VERSION}" "focusbox:${VERSION}"
           docker save -o "release/focusbox-${VERSION}-arm64.tar" "focusbox:${VERSION}"
           docker rmi "focusbox:${VERSION}" >/dev/null
-          ls -lh release
+          ls -lh "release/focusbox-${VERSION}-arm64.tar"
 
       - name: Install fnpack
         shell: bash
@@ -115,45 +176,8 @@ jobs:
         run: |
           set -euo pipefail
           chmod +x deploy/fnos/build.sh deploy/fnos/cmd/*
-          ./deploy/fnos/build.sh \
-            "$VERSION" \
-            "release/focusbox-${VERSION}-amd64.tar" \
-            "release/focusbox-${VERSION}-arm64.tar" \
-            release
-
-      - name: Smoke test image and authentication
-        shell: bash
-        run: |
-          set -euo pipefail
-          VERSION="${{ steps.version.outputs.version }}"
-          rm -rf .smoke-data
-          mkdir -p .smoke-data
-          chmod 777 .smoke-data
-          docker run -d \
-            --name focusbox-smoke \
-            -p 18083:3000 \
-            -e FOCUSBOX_USERNAME=admin \
-            -e FOCUSBOX_PASSWORD=secret123 \
-            -v "$PWD/.smoke-data:/data" \
-            "focusbox:${VERSION}-amd64"
-          trap 'docker rm -f focusbox-smoke >/dev/null 2>&1 || true; rm -rf .smoke-data' EXIT
-
-          for _ in $(seq 1 30); do
-            if curl -fsS http://127.0.0.1:18083/api/health >/dev/null 2>&1; then
-              break
-            fi
-            sleep 1
-          done
-
-          curl -fsS http://127.0.0.1:18083/api/health | grep -q '"status":"ok"'
-
-          CODE="$(curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:18083/)"
-          [ "$CODE" = "401" ] || { echo "未认证访问应返回 401，实际为 $CODE" >&2; exit 1; }
-
-          CODE="$(curl -s -o /dev/null -w '%{http_code}' -u admin:secret123 http://127.0.0.1:18083/)"
-          [ "$CODE" = "200" ] || { echo "认证后访问应返回 200，实际为 $CODE" >&2; exit 1; }
-
-          echo "镜像与访问认证冒烟测试通过。"
+          ./deploy/fnos/build.sh "$VERSION" release
+          ls -lh release
 
       - name: Upload build artifacts
         uses: actions/upload-artifact@v4
