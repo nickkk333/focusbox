@@ -1,0 +1,4 @@
+#!/bin/bash
+# 升级完成后由 fnOS 重新调用 cmd/main start。
+set +e
+exit 0

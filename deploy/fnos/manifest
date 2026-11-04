@@ -1,0 +1,20 @@
+# 专注盒子 FocusBox - 飞牛 fnOS 应用包描述
+# 版本号由 deploy/fnos/build.sh 在打包时写入，必须为 X.Y.Z。
+appname=focusbox
+version=1.0.0
+display_name=专注盒子
+desc=集备忘录、番茄钟与任务清单于一体的自托管效率工具，数据保存在本地 SQLite。
+source=thirdparty
+platform=all
+maintainer=FocusBox
+maintainer_url=https://github.com/nickkk333/focusbox
+distributor=FocusBox
+distributor_url=https://github.com/nickkk333/focusbox
+os_min_version=1.2.0
+desktop_uidir=ui
+desktop_applaunchname=focusbox.main
+service_port=8083
+checkport=false
+ctl_stop=true
+disable_authorization_path=true
+changelog=首个飞牛 fnOS 版本：内置离线镜像，安装时可设置访问用户名、密码与端口。

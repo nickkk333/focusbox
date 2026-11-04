@@ -1,0 +1,67 @@
+[
+  {
+    "stepTitle": "访问账号",
+    "items": [
+      {
+        "type": "text",
+        "field": "wizard_username",
+        "label": "用户名",
+        "initValue": "admin",
+        "rules": [
+          {
+            "required": true,
+            "message": "请输入访问用户名"
+          },
+          {
+            "pattern": "^[^:\\s]{1,64}$",
+            "message": "用户名长度 1-64，且不能包含冒号或空白字符"
+          }
+        ]
+      },
+      {
+        "type": "password",
+        "field": "wizard_password",
+        "label": "密码",
+        "rules": [
+          {
+            "required": true,
+            "message": "请输入访问密码"
+          },
+          {
+            "min": 6,
+            "message": "密码至少 6 位"
+          }
+        ]
+      },
+      {
+        "type": "tips",
+        "helpText": "用户名和密码用于浏览器访问专注盒子时的 HTTP Basic 认证。请妥善保管；如需公网访问，请在前面再加一层 HTTPS 反向代理。"
+      }
+    ]
+  },
+  {
+    "stepTitle": "服务端口",
+    "items": [
+      {
+        "type": "text",
+        "field": "wizard_port",
+        "label": "Web 访问端口",
+        "initValue": "8083",
+        "rules": [
+          {
+            "required": true,
+            "message": "请输入端口号"
+          },
+          {
+            "pattern": "^[1-9][0-9]{0,4}$",
+            "message": "请输入 1-65535 之间的数字端口"
+          }
+        ]
+      },
+      {
+        "type": "tips",
+        "helpText": "默认端口为 8083。安装后可通过 http://飞牛IP:端口 访问，也可以从飞牛桌面图标直接打开。\n\n数据目录固定映射到 /vol1/@appshare/focusbox，无需手动指定。"
+      }
+    ]
+  }
+]

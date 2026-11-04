@@ -3,6 +3,8 @@ data
 dist
 release
 docs
+deploy
+.github
 .git
 .gitignore
 *.log

@@ -53,6 +53,7 @@
 - JSON 全量导出 / 导入
 - 一键恢复初始示例数据
 - 数据持久化到 Docker 卷
+- 可选访问认证：设置 `FOCUSBOX_USERNAME` / `FOCUSBOX_PASSWORD` 后启用 HTTP Basic Auth；飞牛安装包会在安装向导中自动配置
 
 ## 技术栈
 
@@ -100,10 +101,10 @@ docker run -d \
 
 ### 方式三：使用已导出的镜像文件
 
-如果当前目录的 `release/` 下已有 `focusbox-1.0.0.tar`：
+如果当前目录的 `release/` 下已有 CI 导出的镜像 tar（例如 `focusbox-1.0.0-amd64.tar`）：
 
 ```bash
-docker load -i release/focusbox-1.0.0.tar
+docker load -i release/focusbox-1.0.0-amd64.tar
 docker run -d \
   --name focusbox \
   -p 3000:3000 \
@@ -112,7 +113,34 @@ docker run -d \
   focusbox:1.0.0
 ```
 
-### 方式四：本地开发运行
+如需启用访问认证：
+
+```bash
+docker run -d \
+  --name focusbox \
+  -p 3000:3000 \
+  -v focusbox-data:/data \
+  --restart unless-stopped \
+  -e FOCUSBOX_USERNAME=admin \
+  -e FOCUSBOX_PASSWORD=你的密码 \
+  focusbox:1.0.0
+```
+
+### 方式四：飞牛 fnOS（.fpk 安装包）
+
+GitHub Actions 会同时产出离线镜像 tar 与飞牛安装包 `focusbox-fnos-<版本>.fpk`。安装包内已包含 amd64 / arm64 镜像，NAS 无需联网拉取。
+
+在飞牛应用中心 → 手动安装，选择 fpk。安装向导会要求填写：
+
+- 用户名（默认 `admin`）
+- 密码
+- Web 访问端口（默认 `8083`）
+
+数据目录固定为 `/vol1/@appshare/focusbox`，安装时无需选择。安装完成后可从飞牛桌面图标打开，或访问 `http://飞牛IP:8083`。
+
+> 安装包会创建名为 `focusbox` 的 Docker 容器，并通过安装向导填写的用户名、密码启用 HTTP Basic Auth。若需要公网访问，请在前面再加一层 HTTPS 反向代理。
+
+### 方式五：本地开发运行
 
 要求 Node.js **24 或更高版本**（使用内置 `node:sqlite`）。
 
@@ -129,6 +157,17 @@ npm run dev
 
 默认地址：<http://localhost:3000>。本地数据写入项目下的 `data/focusbox.db`。
 
+## GitHub Actions 构建与发布
+
+工作流位于 `.github/workflows/release.yml`。推送到 `main`、推送 `v1.2.3` 形式的 tag，或在 Actions 页面手动触发 `Build and Release`，都会构建并上传以下产物：
+
+- `focusbox-<版本>-amd64.tar`：amd64 Docker 镜像
+- `focusbox-<版本>-arm64.tar`：arm64 Docker 镜像
+- `focusbox-fnos-<版本>.fpk`：飞牛 fnOS 离线安装包（内含双架构镜像）
+- `focusbox-fnos-<版本>.fpk.sha256`：安装包校验和
+
+tag 推送会自动创建 GitHub Release；手动触发时可勾选 `publish` 创建 Release。工作流还会启动 amd64 镜像做健康检查与访问认证冒烟测试。
+
 ## 配置项
 
 | 环境变量 | 默认值 | 说明 |
@@ -137,6 +176,9 @@ npm run dev
 | `HOST` | `0.0.0.0` | HTTP 监听地址 |
 | `DATA_DIR` | 项目下 `data/` | 数据目录；Docker 镜像默认为 `/data` |
 | `DB_FILE` | `$DATA_DIR/focusbox.db` | 可单独指定 SQLite 文件路径 |
+| `FOCUSBOX_USERNAME` | 空 | 可选。设置后与密码一起启用 HTTP Basic Auth |
+| `FOCUSBOX_PASSWORD` | 空 | 可选。设置后与用户名一起启用 HTTP Basic Auth |
+| `FOCUSBOX_FRAME_ANCESTORS` | `'self'` | 允许嵌入页面的来源；飞牛安装包会设为 `'self' http: https:` |
 | `TZ` | 系统时区 | 容器时区，例如 `Asia/Shanghai` |
 
 Compose 中修改端口示例：
@@ -180,6 +222,17 @@ sudo chown -R 1000:1000 ./data
 
 ```text
 .
+├── .github/
+│   └── workflows/
+│       └── release.yml       # 构建镜像 tar、fnOS fpk 并发布
+├── deploy/
+│   └── fnos/                 # 飞牛 fnOS 应用包源
+│       ├── manifest
+│       ├── cmd/              # 安装、启停、升级生命周期脚本
+│       ├── config/           # 权限与资源声明
+│       ├── wizard/           # 安装向导（用户名、密码、端口）
+│       ├── app/ui/           # 桌面入口与图标
+│       └── build.sh          # 本地 / CI 打包脚本
 ├── Dockerfile
 ├── docker-compose.yml
 ├── LICENSE
@@ -247,7 +300,7 @@ sudo chown -R 1000:1000 ./data
 
 ## 设计说明
 
-- **单用户、无登录**：这是面向个人自托管的工具，默认不包含账号体系。请勿直接暴露到公网；如需远程访问，请放在带身份认证的反向代理（如 Nginx、Caddy、Authelia）之后。
+- **单用户、默认无登录**：这是面向个人自托管的工具，默认不包含账号体系。设置 `FOCUSBOX_USERNAME` 与 `FOCUSBOX_PASSWORD` 后会启用 HTTP Basic Auth（飞牛安装包会自动设置）。请勿把未加保护的服务直接暴露到公网；如需远程访问，建议再放在带 HTTPS 的反向代理（如 Nginx、Caddy、Authelia）之后。
 - **计时在浏览器端运行**：刷新页面后通过 `localStorage` 恢复；关闭所有页面后计时不会在后台继续。专注完成后由浏览器向服务端写入记录。
 - **时区**：统计接口接收浏览器传入的 `tzOffset`，按本地日期聚合数据，避免跨时区导致「今天」错位。
 - **静态资源缓存**：服务端对静态文件使用 `no-cache` + ETag 协商缓存，升级镜像后刷新页面即可拿到新版本。

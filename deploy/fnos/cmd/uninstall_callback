@@ -1,0 +1,4 @@
+#!/bin/bash
+# 容器已由 uninstall_init 清理，保留用户数据。
+set +e
+exit 0

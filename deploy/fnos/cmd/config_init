@@ -1,0 +1,4 @@
+#!/bin/bash
+# 配置变更前无需操作。
+set +e
+exit 0

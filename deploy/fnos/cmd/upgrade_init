@@ -1,0 +1,7 @@
+#!/bin/bash
+# 升级前停止旧容器，避免旧镜像继续占用端口。
+set +e
+
+CMD_DIR="$(cd "$(dirname "$0")" && pwd)"
+"$CMD_DIR/main" stop >/dev/null 2>&1
+exit 0

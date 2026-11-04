@@ -2,6 +2,8 @@ node_modules/
 data/
 dist/
 release/
+deploy/fnos/app/images/*.tar
+deploy/fnos/*.fpk
 *.log
 .DS_Store
 .env

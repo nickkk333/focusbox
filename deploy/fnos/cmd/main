@@ -1,0 +1,188 @@
+#!/bin/bash
+#
+# 专注盒子 FocusBox - 飞牛 fnOS 生命周期脚本
+#
+# 本应用不使用 fnOS 的 docker-project 资源，而是由本脚本管理容器：
+# 安装包内自带 amd64 / arm64 镜像 tar，启动时按设备架构 docker load，
+# 因此 NAS 无需联网拉取镜像。脚本以 root 运行（需要访问 Docker）。
+#
+# 退出码：0 = 成功/运行中，1 = 失败，3 = 未运行（仅 status）。
+
+set +e
+
+CONTAINER="${FOCUSBOX_CONTAINER:-focusbox}"
+APP_VERSION="${TRIM_APPVER:-1.0.0}"
+IMAGE_TAG="${FOCUSBOX_IMAGE_TAG:-$APP_VERSION}"
+IMAGE="focusbox:${IMAGE_TAG}"
+APP_DIR="${TRIM_APPDEST:-/var/apps/focusbox/target}"
+PKGVAR="${TRIM_PKGVAR:-/tmp}"
+LOG="${TRIM_TEMP_LOGFILE:-${PKGVAR}/focusbox.log}"
+MAIN_LOG="${PKGVAR}/focusbox-main.log"
+
+# 安装向导字段（fnOS 会把向导值作为环境变量传入生命周期脚本）
+PORT="${wizard_port:-${TRIM_SERVICE_PORT:-8083}}"
+APP_USERNAME="${wizard_username:-}"
+APP_PASSWORD="${wizard_password:-}"
+
+# 数据目录固定映射到飞牛共享目录，安装时无需选择。
+DATA_HOST_DIR="${FOCUSBOX_DATA_DIR:-/vol1/@appshare/focusbox}"
+DATA_UID="${TRIM_UID:-1000}"
+DATA_GID="${TRIM_GID:-1000}"
+
+mkdir -p "$PKGVAR" 2>/dev/null || true
+
+log() {
+  echo "[focusbox main] $*" >> "$MAIN_LOG" 2>&1
+}
+
+fail() {
+  log "ERROR: $*"
+  echo "[focusbox] $*" > "$LOG"
+  exit 1
+}
+
+normalize_port() {
+  case "$PORT" in
+    ''|*[!0-9]*) PORT=8083 ;;
+  esac
+  if [ "$PORT" -lt 1 ] || [ "$PORT" -gt 65535 ]; then
+    PORT=8083
+  fi
+}
+
+detect_arch() {
+  local arch="${TRIM_SYS_ARCH:-}"
+  # 部分 fnOS 版本不注入 TRIM_SYS_ARCH，回退到 uname。
+  [ -n "$arch" ] || arch="$(uname -m 2>/dev/null)"
+  case "$arch" in
+    x86_64|amd64|x64|x86) echo amd64 ;;
+    aarch64|arm64|armv8*|arm) echo arm64 ;;
+    *) echo "" ;;
+  esac
+}
+
+ensure_image() {
+  local arch tar marker want rc
+  arch="$(detect_arch)"
+  if [ -z "$arch" ]; then
+    fail "不支持的 CPU 架构：${TRIM_SYS_ARCH:-未知}。请查看 ${MAIN_LOG}。"
+  fi
+
+  tar="${APP_DIR}/images/focusbox-${arch}.tar"
+  if [ ! -f "$tar" ]; then
+    # 手动安装或旧包升级时，本机可能已经存在镜像。
+    if docker image inspect "$IMAGE" >/dev/null 2>&1; then
+      return 0
+    fi
+    fail "未找到内置镜像 ${tar}，请重新安装完整的 fpk 包。"
+  fi
+
+  marker="${PKGVAR}/focusbox-image.marker"
+  want="$(stat -c '%s_%Y' "$tar" 2>/dev/null)"
+  if [ -n "$want" ] && [ -f "$marker" ] \
+     && [ "$(cat "$marker" 2>/dev/null)" = "$want" ] \
+     && docker image inspect "$IMAGE" >/dev/null 2>&1; then
+    return 0
+  fi
+
+  log "loading image: $tar"
+  docker load -i "$tar" >> "$MAIN_LOG" 2>&1
+  rc=$?
+  log "docker load exit=$rc"
+  if [ "$rc" -ne 0 ] || ! docker image inspect "$IMAGE" >/dev/null 2>&1; then
+    fail "镜像加载失败，请查看 ${MAIN_LOG}。"
+  fi
+  [ -n "$want" ] && echo "$want" > "$marker"
+  return 0
+}
+
+prepare_data_dir() {
+  if [ -z "${FOCUSBOX_DATA_DIR:-}" ] && [ ! -d /vol1 ]; then
+    fail "未找到存储卷 /vol1，无法创建数据目录 ${DATA_HOST_DIR}。"
+  fi
+  mkdir -p "$DATA_HOST_DIR" 2>/dev/null
+  if [ ! -d "$DATA_HOST_DIR" ]; then
+    fail "无法创建数据目录 ${DATA_HOST_DIR}。"
+  fi
+
+  # 只在目录属主不正确时递归修正一次，避免每次启动都遍历数据。
+  local owner
+  owner="$(stat -c '%u' "$DATA_HOST_DIR" 2>/dev/null)"
+  if [ "$owner" != "$DATA_UID" ]; then
+    chown -R "$DATA_UID:$DATA_GID" "$DATA_HOST_DIR" 2>/dev/null || true
+  fi
+}
+
+is_running() {
+  docker inspect -f '{{.State.Running}}' "$CONTAINER" 2>/dev/null | grep -q true
+}
+
+normalize_port
+
+case "$1" in
+  start)
+    log "=== start === version=${APP_VERSION} arch=${TRIM_SYS_ARCH:-unknown} port=${PORT} data=${DATA_HOST_DIR}"
+
+    if is_running; then
+      log "container already running"
+      exit 0
+    fi
+
+    command -v docker >/dev/null 2>&1 || fail "未找到 docker 命令，请确认飞牛 Docker 服务已启用。"
+
+    ensure_image || exit 1
+    prepare_data_dir || exit 1
+
+    # 清理上次异常退出留下的同名容器。
+    docker rm -f "$CONTAINER" >/dev/null 2>&1 || true
+
+    # 通过环境变量传递，避免密码中的 $、反引号等被 shell 再次展开。
+    export FOCUSBOX_USERNAME="$APP_USERNAME"
+    export FOCUSBOX_PASSWORD="$APP_PASSWORD"
+
+    log "docker run ${IMAGE} -> host port ${PORT}"
+    docker run -d \
+      --name "$CONTAINER" \
+      --restart unless-stopped \
+      -p "${PORT}:3000" \
+      -e PORT=3000 \
+      -e HOST=0.0.0.0 \
+      -e DATA_DIR=/data \
+      -e TZ=Asia/Shanghai \
+      -e FOCUSBOX_USERNAME \
+      -e FOCUSBOX_PASSWORD \
+      -e "FOCUSBOX_FRAME_ANCESTORS='self' http: https:" \
+      -v "${DATA_HOST_DIR}:/data" \
+      --user "${DATA_UID}:${DATA_GID}" \
+      "$IMAGE" >> "$MAIN_LOG" 2>&1
+    rc=$?
+    log "docker run exit=$rc"
+
+    sleep 2
+    if is_running; then
+      log "started ok"
+      exit 0
+    fi
+    fail "容器启动失败，请查看 ${MAIN_LOG}。"
+    ;;
+
+  stop)
+    log "=== stop ==="
+    docker stop "$CONTAINER" >> "$MAIN_LOG" 2>&1
+    docker rm "$CONTAINER" >> "$MAIN_LOG" 2>&1
+    log "stopped"
+    exit 0
+    ;;
+
+  status)
+    if is_running; then
+      exit 0
+    fi
+    exit 3
+    ;;
+
+  *)
+    echo "Unknown command: $1" > "$LOG"
+    exit 1
+    ;;
+esac

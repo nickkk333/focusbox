@@ -1,0 +1,17 @@
+#!/bin/bash
+# 安装前检查：fnOS 必须已启用 Docker，且 /vol1 存储卷存在。
+set +e
+
+LOG="${TRIM_TEMP_LOGFILE:-/tmp/focusbox-install.log}"
+
+if ! command -v docker >/dev/null 2>&1; then
+  echo "[focusbox] 未找到 docker 命令，请先在飞牛应用中心安装并启用 Docker。" > "$LOG"
+  exit 1
+fi
+
+if [ ! -d /vol1 ]; then
+  echo "[focusbox] 未找到存储卷 /vol1，无法创建数据目录 /vol1/@appshare/focusbox。" > "$LOG"
+  exit 1
+fi
+
+exit 0
