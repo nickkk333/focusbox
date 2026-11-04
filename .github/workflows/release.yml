@@ -9,9 +9,9 @@ on:
   workflow_dispatch:
     inputs:
       version:
-        description: '版本号（X.Y.Z，例如 1.0.2）'
+        description: '版本号（X.Y.Z，例如 1.0.3）'
         required: true
-        default: '1.0.2'
+        default: '1.0.3'
       publish:
         description: '是否创建 GitHub Release'
         type: boolean
@@ -102,10 +102,13 @@ jobs:
           VERSION="${{ steps.version.outputs.version }}"
           IMAGE_LC="$(echo "$IMAGE" | tr '[:upper:]' '[:lower:]')"
           mkdir -p release
-          docker pull --platform linux/amd64 "${IMAGE_LC}:${VERSION}"
-          docker tag "${IMAGE_LC}:${VERSION}" "focusbox:${VERSION}"
+          DIGEST="$(docker buildx imagetools inspect "${IMAGE_LC}:${VERSION}" --format '{{json .Manifest}}' \
+            | jq -r '.manifests[] | select(.platform.os=="linux" and .platform.architecture=="amd64") | .digest')"
+          [ -n "$DIGEST" ] || { echo "未找到 amd64 镜像" >&2; exit 1; }
+          # 必须按平台 digest 拉取，否则 docker save 会尝试保存多架构 index 而失败。
+          docker pull "${IMAGE_LC}@${DIGEST}"
+          docker tag "${IMAGE_LC}@${DIGEST}" "focusbox:${VERSION}"
           docker save -o "release/focusbox-${VERSION}-amd64.tar" "focusbox:${VERSION}"
-          docker rmi "focusbox:${VERSION}" >/dev/null
           ls -lh "release/focusbox-${VERSION}-amd64.tar"
 
       - name: Smoke test image, permissions and authentication
@@ -123,7 +126,7 @@ jobs:
             -e FOCUSBOX_USERNAME=admin \
             -e FOCUSBOX_PASSWORD=secret123 \
             -v "$PWD/.smoke-data:/data" \
-            "${IMAGE_LC}:${VERSION}"
+            "focusbox:${VERSION}"
           trap 'docker rm -f focusbox-smoke >/dev/null 2>&1 || true; sudo rm -rf .smoke-data' EXIT
 
           for _ in $(seq 1 30); do
@@ -150,8 +153,11 @@ jobs:
           set -euo pipefail
           VERSION="${{ steps.version.outputs.version }}"
           IMAGE_LC="$(echo "$IMAGE" | tr '[:upper:]' '[:lower:]')"
-          docker pull --platform linux/arm64 "${IMAGE_LC}:${VERSION}"
-          docker tag "${IMAGE_LC}:${VERSION}" "focusbox:${VERSION}"
+          DIGEST="$(docker buildx imagetools inspect "${IMAGE_LC}:${VERSION}" --format '{{json .Manifest}}' \
+            | jq -r '.manifests[] | select(.platform.os=="linux" and .platform.architecture=="arm64") | .digest')"
+          [ -n "$DIGEST" ] || { echo "未找到 arm64 镜像" >&2; exit 1; }
+          docker pull "${IMAGE_LC}@${DIGEST}"
+          docker tag "${IMAGE_LC}@${DIGEST}" "focusbox:${VERSION}"
           docker save -o "release/focusbox-${VERSION}-arm64.tar" "focusbox:${VERSION}"
           docker rmi "focusbox:${VERSION}" >/dev/null
           ls -lh "release/focusbox-${VERSION}-arm64.tar"
