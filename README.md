@@ -90,27 +90,27 @@ docker compose down -v
 ### 方式二：直接使用 Docker 命令
 
 ```bash
-docker build -t focusbox:1.0.1 .
+docker build -t focusbox:1.0.2 .
 docker run -d \
   --name focusbox \
   -p 3000:3000 \
   -v focusbox-data:/data \
   --restart unless-stopped \
-  focusbox:1.0.1
+  focusbox:1.0.2
 ```
 
 ### 方式三：使用已导出的镜像文件
 
-如果当前目录的 `release/` 下已有 CI 导出的镜像 tar（例如 `focusbox-1.0.1-amd64.tar`）：
+如果当前目录的 `release/` 下已有 CI 导出的镜像 tar（例如 `focusbox-1.0.2-amd64.tar`）：
 
 ```bash
-docker load -i release/focusbox-1.0.1-amd64.tar
+docker load -i release/focusbox-1.0.2-amd64.tar
 docker run -d \
   --name focusbox \
   -p 3000:3000 \
   -v focusbox-data:/data \
   --restart unless-stopped \
-  focusbox:1.0.1
+  focusbox:1.0.2
 ```
 
 如需启用访问认证：
@@ -123,7 +123,7 @@ docker run -d \
   --restart unless-stopped \
   -e FOCUSBOX_USERNAME=admin \
   -e FOCUSBOX_PASSWORD=你的密码 \
-  focusbox:1.0.1
+  focusbox:1.0.2
 ```
 
 ### 方式四：飞牛 fnOS（.fpk 安装包）

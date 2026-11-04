@@ -67,7 +67,7 @@ function shellHtml() {
         <div class="sidebar-foot">
           <div class="mini-timer" id="mini-timer" hidden></div>
           <div class="sidebar-meta">
-            <span>v1.0.1</span>
+            <span>v1.0.2</span>
             <span class="dot-sep">·</span>
             <span>自托管</span>
           </div>

@@ -3,7 +3,7 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
-    image: focusbox:1.0.1
+    image: focusbox:1.0.2
     container_name: focusbox
     restart: unless-stopped
     ports:

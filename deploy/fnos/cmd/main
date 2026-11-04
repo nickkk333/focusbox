@@ -11,9 +11,9 @@
 set +e
 
 CONTAINER="${FOCUSBOX_CONTAINER:-focusbox}"
-APP_VERSION="${TRIM_APPVER:-1.0.1}"
+APP_VERSION="${TRIM_APPVER:-1.0.2}"
 # build.sh 会把 DEFAULT_IMAGE_TAG 改成实际版本；FOCUSBOX_IMAGE_TAG 可覆盖。
-DEFAULT_IMAGE_TAG="1.0.1"
+DEFAULT_IMAGE_TAG="1.0.2"
 IMAGE_REPO="${FOCUSBOX_IMAGE_REPO:-ghcr.io/nickkk333/focusbox}"
 IMAGE_TAG="${FOCUSBOX_IMAGE_TAG:-$DEFAULT_IMAGE_TAG}"
 IMAGE="${FOCUSBOX_IMAGE:-${IMAGE_REPO}:${IMAGE_TAG}}"
@@ -112,8 +112,14 @@ case "$1" in
     log "=== start === version=${APP_VERSION} port=${PORT} data=${DATA_HOST_DIR} image=${IMAGE}"
 
     if is_running; then
-      log "container already running"
-      exit 0
+      current_image="$(docker inspect -f '{{.Config.Image}}' "$CONTAINER" 2>/dev/null)"
+      if [ "$current_image" = "$IMAGE" ]; then
+        log "container already running with ${IMAGE}"
+        exit 0
+      fi
+      log "recreating container: ${current_image:-unknown} -> ${IMAGE}"
+      docker stop "$CONTAINER" >> "$MAIN_LOG" 2>&1
+      docker rm "$CONTAINER" >> "$MAIN_LOG" 2>&1
     fi
 
     command -v docker >/dev/null 2>&1 || fail "未找到 docker 命令，请确认飞牛 Docker 服务已启用。"
