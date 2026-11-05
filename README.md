@@ -142,7 +142,23 @@ GitHub Actions 会构建多架构镜像并推送到 GHCR，同时产出轻量安
 >
 > 首次发布后，请到 GitHub 仓库的 Packages 页面确认 `focusbox` 包可见性为 **Public**；否则 fnOS 无法匿名拉取镜像。工作流会尝试自动设置，若失败请手动修改。
 
-### 方式五：本地开发运行
+### 方式五：安卓客户端（APK）
+
+仓库的 `android/` 目录包含一个轻量 WebView 客户端。首次启动时填写服务器地址、用户名和密码，登录后与在手机浏览器中访问同一地址完全一致，可以查看和修改全部数据，也支持任务、备忘、统计、设置以及 JSON 备份的导入 / 导出。
+
+构建 APK：
+
+```powershell
+$env:ANDROID_SDK_ROOT = "D:\tools\android-sdk"
+$env:JAVA_HOME = "D:\tools\jdk17\jdk-17.0.21+9"
+powershell -ExecutionPolicy Bypass -File android\build.ps1
+```
+
+输出为 `android/dist/focusbox-android-<版本>.apk`。首次构建会在 `android/keystore/` 生成自签名更新密钥，请保留该文件，以便后续版本覆盖安装。详细说明见 [`android/README.md`](android/README.md)。
+
+安装后在首屏输入例如 `http://192.168.1.20:8083`、安装向导中设置的用户名和密码即可。局域网可以直接使用 HTTP；公网访问请在服务器前配置 HTTPS 反向代理。
+
+### 方式六：本地开发运行
 
 要求 Node.js **24 或更高版本**（使用内置 `node:sqlite`）。
 
@@ -230,6 +246,11 @@ sudo chown -R 1000:1000 ./data
 ├── .github/
 │   └── workflows/
 │       └── release.yml       # 构建并推送镜像、打包 fnOS fpk 并发布
+├── android/
+│   ├── src/                  # MainActivity（WebView + Basic Auth）
+│   ├── res/                  # 图标、主题、字符串
+│   ├── AndroidManifest.xml
+│   └── build.ps1             # 本地 APK 构建脚本
 ├── deploy/
 │   └── fnos/                 # 飞牛 fnOS 应用包源
 │       ├── manifest
