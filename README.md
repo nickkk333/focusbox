@@ -12,18 +12,18 @@
 
 ### 今日工作台
 - 今日专注时长、完成番茄数、完成任务数、连续专注天数与逾期任务概览
-- 今日到期任务快速勾选完成，或直接开始一次专注
+- 当前日期落在「开始日期～截止日期」区间内的任务会显示在今日，可快速勾选完成或直接开始专注
 - 快速添加今日任务
 - 随手记备忘，支持 `Ctrl + Enter` 快捷保存
 - 最近备忘预览与置顶标记
 
 ### 任务清单
 - 项目分类（内置「工作 / 生活 / 学习」，可自行增删改）
-- 优先级、截止日期、预计时长、备注
-- 子任务拆分与勾选
+- 优先级、开始日期（默认创建当天）、截止日期、预计时长、备注
+- 子任务拆分、勾选与标题修改保存
 - 手动记录投入时间，自动汇总番茄专注时长
 - 按状态、项目、优先级筛选，支持关键词搜索
-- 任务详情抽屉内即时编辑，自动保存
+- 任务详情抽屉内编辑，点击「保存修改」按钮生效
 
 ### 番茄钟
 - 专注 / 短休息 / 长休息三种模式
@@ -53,7 +53,7 @@
 - JSON 全量导出 / 导入
 - 一键恢复初始示例数据
 - 数据持久化到 Docker 卷
-- 可选访问认证：设置 `FOCUSBOX_USERNAME` / `FOCUSBOX_PASSWORD` 后启用 HTTP Basic Auth；飞牛安装包会在安装向导中自动配置
+- 可选登录 / 退出登录：设置 `FOCUSBOX_USERNAME` / `FOCUSBOX_PASSWORD` 后启用；浏览器登录页只需用户名和密码，安卓客户端登录页额外填写服务器 IP，退出登录后可更换服务器或账号；飞牛安装包会在安装向导中自动配置
 
 ## 技术栈
 
@@ -90,30 +90,30 @@ docker compose down -v
 ### 方式二：直接使用 Docker 命令
 
 ```bash
-docker build -t focusbox:1.0.4 .
+docker build -t focusbox:1.0.5 .
 docker run -d \
   --name focusbox \
   -p 3000:3000 \
   -v focusbox-data:/data \
   --restart unless-stopped \
-  focusbox:1.0.4
+  focusbox:1.0.5
 ```
 
 ### 方式三：使用已导出的镜像文件
 
-如果当前目录的 `release/` 下已有 CI 导出的镜像 tar（例如 `focusbox-1.0.4-amd64.tar`）：
+如果当前目录的 `release/` 下已有 CI 导出的镜像 tar（例如 `focusbox-1.0.5-amd64.tar`）：
 
 ```bash
-docker load -i release/focusbox-1.0.4-amd64.tar
+docker load -i release/focusbox-1.0.5-amd64.tar
 docker run -d \
   --name focusbox \
   -p 3000:3000 \
   -v focusbox-data:/data \
   --restart unless-stopped \
-  focusbox:1.0.4
+  focusbox:1.0.5
 ```
 
-如需启用访问认证：
+如需启用登录：
 
 ```bash
 docker run -d \
@@ -123,7 +123,7 @@ docker run -d \
   --restart unless-stopped \
   -e FOCUSBOX_USERNAME=admin \
   -e FOCUSBOX_PASSWORD=你的密码 \
-  focusbox:1.0.4
+  focusbox:1.0.5
 ```
 
 ### 方式四：飞牛 fnOS（.fpk 安装包）
@@ -138,13 +138,13 @@ GitHub Actions 会构建多架构镜像并推送到 GHCR，同时产出轻量安
 
 数据目录固定为 `/vol1/@appshare/focusbox`，安装时无需选择。安装完成后可从飞牛桌面图标打开，或访问 `http://飞牛IP:8083`。
 
-> 安装包会创建名为 `focusbox` 的 Docker 容器，并通过安装向导填写的用户名、密码启用 HTTP Basic Auth。若需要公网访问，请在前面再加一层 HTTPS 反向代理。
+> 安装包会创建名为 `focusbox` 的 Docker 容器，并通过安装向导填写的用户名、密码启用登录页。若需要公网访问，请在前面再加一层 HTTPS 反向代理。
 >
 > 首次发布后，请到 GitHub 仓库的 Packages 页面确认 `focusbox` 包可见性为 **Public**；否则 fnOS 无法匿名拉取镜像。工作流会尝试自动设置，若失败请手动修改。
 
 ### 方式五：安卓客户端（APK）
 
-仓库的 `android/` 目录包含一个轻量 WebView 客户端。首次启动时填写服务器地址、用户名和密码，登录后与在手机浏览器中访问同一地址完全一致，可以查看和修改全部数据，也支持任务、备忘、统计、设置以及 JSON 备份的导入 / 导出。
+仓库的 `android/` 目录包含一个轻量 WebView 客户端。登录页填写服务器 IP / 地址、用户名和密码；顶部菜单可「退出登录」，退出后回到登录页重新填写服务器 IP 即可更换服务器或账号。登录后与在手机浏览器中访问同一地址完全一致，可以查看和修改全部数据，也支持任务、备忘、统计、设置以及 JSON 备份的导入 / 导出。
 
 推送 `v*` tag 时，GitHub Actions 会使用 Android SDK 自动构建 APK，并附加到对应的 GitHub Release：
 
@@ -165,7 +165,7 @@ powershell -ExecutionPolicy Bypass -File android\build.ps1
 
 输出为 `android/dist/focusbox-android-<版本>.apk`。详细说明见 [`android/README.md`](android/README.md)。
 
-安装后在首屏输入例如 `http://192.168.1.20:8083`、安装向导中设置的用户名和密码即可。局域网可以直接使用 HTTP；公网访问请在服务器前配置 HTTPS 反向代理。
+安装后在登录页输入例如 `http://192.168.1.20:8083`、安装向导中设置的用户名和密码即可。若服务器未启用登录，用户名和密码可以留空。局域网可以直接使用 HTTP；公网访问请在服务器前配置 HTTPS 反向代理。
 
 ### 方式六：本地开发运行
 
@@ -195,7 +195,7 @@ npm run dev
 - `focusbox-android-<版本>.apk`：安卓客户端
 - `focusbox-android-<版本>.apk.sha256`：APK 校验和
 
-镜像地址为 `ghcr.io/nickkk333/focusbox:<版本>` 和 `ghcr.io/nickkk333/focusbox:latest`。tag 推送会自动创建 GitHub Release；手动触发时可勾选 `publish` 创建 Release。工作流还会启动 amd64 镜像做健康检查、数据目录权限与访问认证冒烟测试。
+镜像地址为 `ghcr.io/nickkk333/focusbox:<版本>` 和 `ghcr.io/nickkk333/focusbox:latest`。tag 推送会自动创建 GitHub Release；手动触发时可勾选 `publish` 创建 Release。工作流还会启动 amd64 镜像做健康检查、数据目录权限与登录/登出冒烟测试。
 
 ## 配置项
 
@@ -205,8 +205,8 @@ npm run dev
 | `HOST` | `0.0.0.0` | HTTP 监听地址 |
 | `DATA_DIR` | 项目下 `data/` | 数据目录；Docker 镜像默认为 `/data` |
 | `DB_FILE` | `$DATA_DIR/focusbox.db` | 可单独指定 SQLite 文件路径 |
-| `FOCUSBOX_USERNAME` | 空 | 可选。设置后与密码一起启用 HTTP Basic Auth |
-| `FOCUSBOX_PASSWORD` | 空 | 可选。设置后与用户名一起启用 HTTP Basic Auth |
+| `FOCUSBOX_USERNAME` | 空 | 可选。设置后与密码一起启用登录页与退出登录 |
+| `FOCUSBOX_PASSWORD` | 空 | 可选。设置后与用户名一起启用登录页与退出登录 |
 | `FOCUSBOX_FRAME_ANCESTORS` | `'self'` | 允许嵌入页面的来源；飞牛安装包会设为 `'self' http: https:` |
 | `FOCUSBOX_DATA_DIR` | `/vol1/@appshare/focusbox` | 仅飞牛安装包使用，覆盖宿主机数据目录 |
 | `FOCUSBOX_IMAGE_REPO` | `ghcr.io/nickkk333/focusbox` | 仅飞牛安装包使用，覆盖镜像仓库 |
@@ -258,7 +258,7 @@ sudo chown -R 1000:1000 ./data
 │   └── workflows/
 │       └── release.yml       # 构建并推送镜像、打包 fnOS fpk 并发布
 ├── android/
-│   ├── src/                  # MainActivity（WebView + Basic Auth）
+│   ├── src/                  # MainActivity（WebView + 登录/登出页）
 │   ├── res/                  # 图标、主题、字符串
 │   ├── AndroidManifest.xml
 │   └── build.ps1             # 本地 APK 构建脚本
@@ -313,15 +313,18 @@ sudo chown -R 1000:1000 ./data
 
 | 方法 | 路径 | 说明 |
 | --- | --- | --- |
-| GET | `/api/health` | 健康检查 |
+| GET | `/api/health` | 健康检查（匿名） |
+| GET | `/api/auth/status` | 当前登录状态（匿名） |
+| POST | `/api/auth/login` | 用户名密码登录，签发会话 Cookie（匿名） |
+| POST | `/api/auth/logout` | 退出登录并撤销会话（匿名） |
 | GET / POST | `/api/projects` | 项目列表 / 新建项目 |
 | PATCH / DELETE | `/api/projects/:id` | 更新 / 删除项目 |
-| GET | `/api/tasks` | 任务列表，支持 `status`、`projectId`、`priority`、`due`、`search`、`date` |
-| POST | `/api/tasks` | 新建任务 |
-| GET / PATCH / DELETE | `/api/tasks/:id` | 任务详情 / 更新 / 删除 |
+| GET | `/api/tasks` | 任务列表，支持 `status`、`projectId`、`priority`、`due`、`search`、`date`；`due=today` 表示当天落在开始日期～截止日期区间内 |
+| POST | `/api/tasks` | 新建任务，未传 `startDate` 时默认为创建当天 |
+| GET / PATCH / DELETE | `/api/tasks/:id` | 任务详情 / 更新 / 删除，支持 `startDate` |
 | POST | `/api/tasks/:id/toggle` | 切换完成状态 |
 | POST | `/api/tasks/:id/subtasks` | 新建子任务 |
-| PATCH / DELETE | `/api/tasks/subtasks/:id` | 更新 / 删除子任务 |
+| PATCH / DELETE | `/api/tasks/subtasks/:id` | 修改标题或完成状态 / 删除子任务 |
 | POST | `/api/tasks/:id/time` | 手动记录投入时间 |
 | DELETE | `/api/tasks/time/:id` | 删除时间记录 |
 | GET / POST | `/api/memos` | 备忘列表 / 新建备忘 |
@@ -338,7 +341,7 @@ sudo chown -R 1000:1000 ./data
 
 ## 设计说明
 
-- **单用户、默认无登录**：这是面向个人自托管的工具，默认不包含账号体系。设置 `FOCUSBOX_USERNAME` 与 `FOCUSBOX_PASSWORD` 后会启用 HTTP Basic Auth（飞牛安装包会自动设置）。请勿把未加保护的服务直接暴露到公网；如需远程访问，建议再放在带 HTTPS 的反向代理（如 Nginx、Caddy、Authelia）之后。
+- **单用户、默认无登录**：这是面向个人自托管的工具，默认不包含账号体系。设置 `FOCUSBOX_USERNAME` 与 `FOCUSBOX_PASSWORD` 后会启用登录（飞牛安装包会自动设置）：浏览器登录页只填用户名和密码，安卓客户端登录页多一个服务器 IP / 地址字段，退出登录后回到登录页即可换服务器或账号。登录使用服务端会话（HttpOnly Cookie，30 天有效），登出会立即撤销会话；同时保留 HTTP Basic 校验以兼容旧版客户端与自动化脚本。请勿把未加保护的服务直接暴露到公网；如需远程访问，建议再放在带 HTTPS 的反向代理（如 Nginx、Caddy、Authelia）之后。
 - **计时在浏览器端运行**：刷新页面后通过 `localStorage` 恢复；关闭所有页面后计时不会在后台继续。专注完成后由浏览器向服务端写入记录。
 - **时区**：统计接口接收浏览器传入的 `tzOffset`，按本地日期聚合数据，避免跨时区导致「今天」错位。
 - **静态资源缓存**：服务端对静态文件使用 `no-cache` + ETag 协商缓存，升级镜像后刷新页面即可拿到新版本。

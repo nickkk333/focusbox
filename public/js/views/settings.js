@@ -134,7 +134,7 @@ export async function render(container) {
           <span class="about-logo">${LOGO_SVG}</span>
           <div>
             <h3>专注盒子</h3>
-            <p>版本 v1.0.4 · 简体中文</p>
+            <p>版本 v1.0.5 · 简体中文</p>
           </div>
         </div>
         <p class="about-desc">

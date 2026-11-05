@@ -1443,15 +1443,36 @@
   outline-offset: 2px;
 }
 
-.subtask-title {
+.subtask-title-input {
   flex: 1;
+  min-width: 0;
+  padding: 3px 6px;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text);
+  font: inherit;
   font-size: 12.5px;
   line-height: 1.5;
+  outline: none;
 }
 
-.subtask-row.done .subtask-title {
+.subtask-title-input:hover {
+  border-color: var(--border);
+}
+
+.subtask-title-input:focus {
+  border-color: var(--accent);
+  background: var(--bg-elevated);
+}
+
+.subtask-row.done .subtask-title-input {
   color: var(--text-tertiary);
   text-decoration: line-through;
+}
+
+.subtask-row.is-edited .btn[data-action="save-subtask"] {
+  opacity: 1;
 }
 
 .subtask-add {
@@ -1561,6 +1582,16 @@
 
 .save-hint.error {
   color: var(--danger);
+}
+
+.save-hint.unsaved {
+  color: var(--accent);
+}
+
+.detail-save-actions {
+  display: flex;
+  align-items: center;
+  gap: 12px;
 }
 
 /* ---------- 项目编辑 ---------- */
@@ -1898,6 +1929,12 @@
   .detail-actions {
     align-items: stretch;
     flex-direction: column-reverse;
+  }
+
+  .detail-save-actions {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 8px;
   }
 
   .detail-actions .btn {

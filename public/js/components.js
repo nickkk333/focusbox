@@ -121,7 +121,7 @@ export function openModal({
   return { root: backdrop, close };
 }
 
-export function openDrawer({ title = '', subtitle = '', body = '', onMount, onClose } = {}) {
+export function openDrawer({ title = '', subtitle = '', body = '', onMount, onClose, onBeforeClose } = {}) {
   const root = document.getElementById('drawer-root');
   const backdrop = document.createElement('div');
   backdrop.className = 'drawer-backdrop';
@@ -145,6 +145,7 @@ export function openDrawer({ title = '', subtitle = '', body = '', onMount, onCl
 
   function close() {
     if (closed) return;
+    if (typeof onBeforeClose === 'function' && onBeforeClose() === false) return;
     closed = true;
     unregister();
     backdrop.classList.add('closing');

@@ -2,7 +2,7 @@
 
 const express = require('express');
 const { db, nowIso } = require('../db');
-const { httpError, asInt, parseId, localDateModifier } = require('../utils');
+const { httpError, asInt, parseId, localDateModifier, taskOnDateClause } = require('../utils');
 
 const router = express.Router();
 
@@ -222,8 +222,8 @@ router.get('/stats', (req, res) => {
     .prepare("SELECT COUNT(*) AS count FROM tasks WHERE status = 'open' AND due_date IS NOT NULL AND due_date < ?")
     .get(today).count;
   const todayTasks = db
-    .prepare("SELECT COUNT(*) AS count FROM tasks WHERE status = 'open' AND due_date = ?")
-    .get(today).count;
+    .prepare(`SELECT COUNT(*) AS count FROM tasks WHERE status = 'open' AND ${taskOnDateClause()}`)
+    .get(today, today).count;
 
   const memoTotal = db.prepare('SELECT COUNT(*) AS count FROM memos WHERE archived = 0').get().count;
   const pinnedMemos = db.prepare('SELECT COUNT(*) AS count FROM memos WHERE archived = 0 AND pinned = 1').get().count;
@@ -292,8 +292,8 @@ router.get('/badges', (req, res) => {
 
   const openTasks = db.prepare("SELECT COUNT(*) AS count FROM tasks WHERE status = 'open'").get().count;
   const todayTasks = db
-    .prepare("SELECT COUNT(*) AS count FROM tasks WHERE status = 'open' AND due_date = ?")
-    .get(today).count;
+    .prepare(`SELECT COUNT(*) AS count FROM tasks WHERE status = 'open' AND ${taskOnDateClause()}`)
+    .get(today, today).count;
   const memos = db.prepare('SELECT COUNT(*) AS count FROM memos WHERE archived = 0').get().count;
   const focusTodaySeconds = db
     .prepare(

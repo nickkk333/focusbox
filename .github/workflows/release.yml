@@ -9,9 +9,9 @@ on:
   workflow_dispatch:
     inputs:
       version:
-        description: '版本号（X.Y.Z，例如 1.0.4）'
+        description: '版本号（X.Y.Z，例如 1.0.5）'
         required: true
-        default: '1.0.4'
+        default: '1.0.5'
       publish:
         description: '是否创建 GitHub Release'
         type: boolean
@@ -139,13 +139,26 @@ jobs:
           curl -fsS http://127.0.0.1:18083/api/health | grep -q '"status":"ok"'
           test -f .smoke-data/focusbox.db
 
+          # 页面与静态资源匿名，登录由前端登录页处理；业务接口仍需要认证。
           CODE="$(curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:18083/)"
-          [ "$CODE" = "401" ] || { echo "未认证访问应返回 401，实际为 $CODE" >&2; exit 1; }
+          [ "$CODE" = "200" ] || { echo "登录页应返回 200，实际为 $CODE" >&2; exit 1; }
 
-          CODE="$(curl -s -o /dev/null -w '%{http_code}' -u admin:secret123 http://127.0.0.1:18083/)"
-          [ "$CODE" = "200" ] || { echo "认证后访问应返回 200，实际为 $CODE" >&2; exit 1; }
+          CODE="$(curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:18083/api/settings)"
+          [ "$CODE" = "401" ] || { echo "未登录访问业务接口应返回 401，实际为 $CODE" >&2; exit 1; }
 
-          echo "镜像、数据目录权限与访问认证冒烟测试通过。"
+          CODE="$(curl -s -o /dev/null -w '%{http_code}' -u admin:secret123 http://127.0.0.1:18083/api/settings)"
+          [ "$CODE" = "200" ] || { echo "Basic 兼容访问应返回 200，实际为 $CODE" >&2; exit 1; }
+
+          curl -fsS -c /tmp/focusbox-cookie.txt -H 'Content-Type: application/json' \
+            -d '{"username":"admin","password":"secret123"}' \
+            http://127.0.0.1:18083/api/auth/login | grep -q '"authenticated":true'
+          curl -fsS -b /tmp/focusbox-cookie.txt http://127.0.0.1:18083/api/settings >/dev/null
+          curl -fsS -b /tmp/focusbox-cookie.txt -X POST \
+            http://127.0.0.1:18083/api/auth/logout >/dev/null
+          CODE="$(curl -s -o /dev/null -w '%{http_code}' -b /tmp/focusbox-cookie.txt http://127.0.0.1:18083/api/settings)"
+          [ "$CODE" = "401" ] || { echo "登出后访问业务接口应返回 401，实际为 $CODE" >&2; exit 1; }
+
+          echo "镜像、数据目录权限与登录/登出冒烟测试通过。"
 
       - name: Export arm64 image tarball
         shell: bash

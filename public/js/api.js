@@ -1,5 +1,11 @@
+import { bus } from './bus.js';
+
 async function request(method, path, body) {
-  const options = { method, headers: { Accept: 'application/json' } };
+  const options = {
+    method,
+    headers: { Accept: 'application/json' },
+    credentials: 'same-origin',
+  };
   if (body !== undefined) {
     options.headers['Content-Type'] = 'application/json';
     options.body = JSON.stringify(body);
@@ -18,6 +24,10 @@ async function request(method, path, body) {
     } catch (_) {
       data = null;
     }
+  }
+  // 会话失效时通知外壳切回登录页；登录接口自身的 401 由登录表单展示错误。
+  if (response.status === 401 && !path.startsWith('/api/auth/')) {
+    bus.emit('auth-required');
   }
   if (!response.ok) {
     throw new Error(data?.error || `请求失败（${response.status}）`);

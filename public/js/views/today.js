@@ -13,7 +13,8 @@ import {
   formatFocus,
   formatMinutes,
   formatClock,
-  dueLabel,
+  dateBadge,
+  isTaskOnDate,
   priorityMeta,
   relativeTime,
 } from '../utils.js';
@@ -32,7 +33,7 @@ function statCard(iconName, value, label, hint, tone = '') {
 }
 
 function miniTaskHtml(task) {
-  const due = dueLabel(task.dueDate);
+  const due = dateBadge(task);
   const priority = priorityMeta(task.priority);
   return `
     <div class="mini-task ${task.status === 'done' ? 'done' : ''}" data-task-id="${task.id}">
@@ -110,9 +111,11 @@ export async function render(container) {
   ]);
 
   const tasks = (taskData.tasks || [])
-    .filter((task) => task.dueDate && task.dueDate <= date)
+    .filter((task) => isTaskOnDate(task, date))
     .sort((a, b) => {
-      if (a.dueDate !== b.dueDate) return a.dueDate.localeCompare(b.dueDate);
+      const dueA = a.dueDate || '9999-12-31';
+      const dueB = b.dueDate || '9999-12-31';
+      if (dueA !== dueB) return dueA.localeCompare(dueB);
       return b.priority - a.priority;
     })
     .slice(0, 6);
@@ -170,7 +173,7 @@ export async function render(container) {
           ${
             tasks.length
               ? tasks.map(miniTaskHtml).join('')
-              : `<div class="mini-empty">${icon('smile', 22)}<span>今天没有到期的任务，享受这份从容吧。</span></div>`
+              : `<div class="mini-empty">${icon('smile', 22)}<span>今天没有需要处理的任务，享受这份从容吧。</span></div>`
           }
         </div>
       </section>
@@ -264,7 +267,7 @@ export async function render(container) {
       return;
     }
     try {
-      await api.post('/api/tasks', { title, dueDate: date });
+      await api.post('/api/tasks', { title, startDate: date, dueDate: date });
       toast('任务已添加到今天', 'success');
       refresh();
     } catch (error) {

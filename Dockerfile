@@ -5,7 +5,7 @@ FROM node:24-alpine
 
 LABEL org.opencontainers.image.title="FocusBox" \
       org.opencontainers.image.description="备忘录、番茄钟与任务清单于一体的自托管效率工具" \
-      org.opencontainers.image.version="1.0.4" \
+      org.opencontainers.image.version="1.0.5" \
       org.opencontainers.image.licenses="MIT"
 
 ENV NODE_ENV=production \

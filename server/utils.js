@@ -68,6 +68,7 @@ function mapTask(row) {
     notes: row.notes,
     priority: row.priority,
     status: row.status,
+    startDate: row.start_date || null,
     dueDate: row.due_date,
     estimateMinutes: row.estimate_minutes,
     completedAt: row.completed_at,
@@ -117,6 +118,14 @@ function localDateModifier(tzOffset) {
   return `${minutes} minutes`;
 }
 
+// 「某天属于任务的有效区间」的统一判定，两个占位符都传同一天。
+// 未设置开始日期视为不受下界限制，未设置截止日期视为不受上界限制。
+function taskOnDateClause(prefix = '') {
+  const start = `${prefix}start_date`;
+  const due = `${prefix}due_date`;
+  return `(${start} IS NULL OR ${start} <= ?) AND (${due} IS NULL OR ${due} >= ?)`;
+}
+
 module.exports = {
   ApiError,
   httpError,
@@ -129,4 +138,5 @@ module.exports = {
   mapMemo,
   mapProject,
   localDateModifier,
+  taskOnDateClause,
 };

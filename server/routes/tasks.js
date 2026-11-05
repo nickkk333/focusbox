@@ -9,6 +9,7 @@ const {
   asDateString,
   parseId,
   mapTask,
+  taskOnDateClause,
 } = require('../utils');
 
 const router = express.Router();
@@ -85,16 +86,17 @@ router.get('/', (req, res) => {
 
   const due = String(req.query.due || '');
   if (due === 'today') {
-    where.push('t.due_date = ?');
-    params.push(today);
+    where.push(`(${taskOnDateClause('t.')})`);
+    params.push(today, today);
   } else if (due === 'overdue') {
     where.push("t.due_date IS NOT NULL AND t.due_date < ? AND t.status = 'open'");
     params.push(today);
   } else if (due === 'week') {
     const end = new Date(`${today}T00:00:00Z`);
     end.setUTCDate(end.getUTCDate() + 7);
-    where.push('t.due_date IS NOT NULL AND t.due_date >= ? AND t.due_date <= ?');
-    params.push(today, end.toISOString().slice(0, 10));
+    const endDate = end.toISOString().slice(0, 10);
+    where.push('(t.start_date IS NULL OR t.start_date <= ?) AND (t.due_date IS NULL OR t.due_date >= ?)');
+    params.push(endDate, today);
   } else if (due === 'none') {
     where.push('t.due_date IS NULL');
   }
@@ -153,16 +155,20 @@ router.post('/', (req, res) => {
 
   const notes = asText(req.body?.notes, { max: 20000 });
   const priority = asInt(req.body?.priority, { min: 0, max: 3, fallback: 0 });
-  const dueDate = asDateString(req.body?.dueDate);
   const estimateMinutes = asInt(req.body?.estimateMinutes, { min: 0, max: 100000, fallback: 0 });
   const createdAt = nowIso();
+  const startDate = req.body?.startDate === undefined || req.body.startDate === ''
+    ? createdAt.slice(0, 10)
+    : asDateString(req.body.startDate);
+  const dueDate = asDateString(req.body?.dueDate);
+  if (startDate && dueDate && startDate > dueDate) throw httpError(400, '开始日期不能晚于截止日期');
 
   const info = db
     .prepare(
-      `INSERT INTO tasks (project_id, title, notes, priority, status, due_date, estimate_minutes, created_at, updated_at)
-       VALUES (?, ?, ?, ?, 'open', ?, ?, ?, ?)`
+      `INSERT INTO tasks (project_id, title, notes, priority, status, start_date, due_date, estimate_minutes, created_at, updated_at)
+       VALUES (?, ?, ?, ?, 'open', ?, ?, ?, ?, ?)`
     )
-    .run(projectId, title, notes, priority, dueDate, estimateMinutes, createdAt, createdAt);
+    .run(projectId, title, notes, priority, startDate, dueDate, estimateMinutes, createdAt, createdAt);
 
   res.status(201).json({ task: mapTask(getTask(Number(info.lastInsertRowid))) });
 });
@@ -185,6 +191,7 @@ router.patch('/:id', (req, res) => {
   if (req.body?.estimateMinutes !== undefined) {
     updates.estimate_minutes = asInt(req.body.estimateMinutes, { min: 0, max: 100000, fallback: task.estimate_minutes });
   }
+  if (req.body?.startDate !== undefined) updates.start_date = asDateString(req.body.startDate);
   if (req.body?.dueDate !== undefined) updates.due_date = asDateString(req.body.dueDate);
   if (req.body?.projectId !== undefined) {
     if (req.body.projectId === null || req.body.projectId === '') {
@@ -202,6 +209,10 @@ router.patch('/:id', (req, res) => {
     updates.status = status;
     updates.completed_at = status === 'done' ? nowIso() : null;
   }
+
+  const finalStart = 'start_date' in updates ? updates.start_date : task.start_date;
+  const finalDue = 'due_date' in updates ? updates.due_date : task.due_date;
+  if (finalStart && finalDue && finalStart > finalDue) throw httpError(400, '开始日期不能晚于截止日期');
 
   updates.updated_at = nowIso();
 

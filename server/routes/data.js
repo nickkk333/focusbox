@@ -21,6 +21,7 @@ function exportAll() {
     notes: row.notes,
     priority: row.priority,
     status: row.status,
+    startDate: row.start_date || null,
     dueDate: row.due_date,
     estimateMinutes: row.estimate_minutes,
     completedAt: row.completed_at,
@@ -139,8 +140,8 @@ router.post('/import', (req, res) => {
     }
 
     const insertTask = db.prepare(
-      `INSERT INTO tasks (id, project_id, title, notes, priority, status, due_date, estimate_minutes, completed_at, created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+      `INSERT INTO tasks (id, project_id, title, notes, priority, status, start_date, due_date, estimate_minutes, completed_at, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
     );
     for (const item of arrayOf(payload, 'tasks')) {
       const title = asText(item?.title, { max: 300 }).trim();
@@ -150,6 +151,12 @@ router.post('/import', (req, res) => {
       taskIds.add(id);
       const projectId = asInt(item?.projectId, { min: 1, max: Number.MAX_SAFE_INTEGER, fallback: 0 });
       const status = item?.status === 'done' ? 'done' : 'open';
+      const createdAt = isoOrNull(item?.createdAt) || now;
+      const dueDate = /^\d{4}-\d{2}-\d{2}$/.test(String(item?.dueDate || '')) ? item.dueDate : null;
+      // 旧备份没有开始日期时按创建当天回填。
+      const startDate = /^\d{4}-\d{2}-\d{2}$/.test(String(item?.startDate || ''))
+        ? item.startDate
+        : createdAt.slice(0, 10);
       insertTask.run(
         id,
         projectIds.has(projectId) ? projectId : null,
@@ -157,10 +164,11 @@ router.post('/import', (req, res) => {
         asText(item?.notes, { max: 20000 }),
         asInt(item?.priority, { min: 0, max: 3, fallback: 0 }),
         status,
-        /^\d{4}-\d{2}-\d{2}$/.test(String(item?.dueDate || '')) ? item.dueDate : null,
+        dueDate && startDate > dueDate ? dueDate : startDate,
+        dueDate,
         asInt(item?.estimateMinutes, { min: 0, max: 100000, fallback: 0 }),
         status === 'done' ? isoOrNull(item?.completedAt) || now : null,
-        isoOrNull(item?.createdAt) || now,
+        createdAt,
         isoOrNull(item?.updatedAt) || now
       );
     }

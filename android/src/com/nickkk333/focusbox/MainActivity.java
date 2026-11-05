@@ -57,11 +57,13 @@ public class MainActivity extends Activity {
     private static final String KEY_SERVER = "server_url";
     private static final String KEY_USERNAME = "username";
     private static final String KEY_PASSWORD = "password";
+    private static final String KEY_LOGGED_IN = "logged_in";
 
     private static final int REQUEST_FILE_CHOOSER = 1001;
     private static final int REQUEST_SAVE_EXPORT = 1002;
     private static final int MENU_REFRESH = 1;
     private static final int MENU_SETTINGS = 2;
+    private static final int MENU_LOGOUT = 3;
 
     // 仅本地调试时改为 true，正式 APK 保持 false。
     private static final boolean WEBVIEW_DEBUG = false;
@@ -70,6 +72,7 @@ public class MainActivity extends Activity {
     private String serverUrl = "";
     private String username = "";
     private String password = "";
+    private boolean loggedIn = false;
 
     private WebView webView;
     private ProgressBar progressBar;
@@ -83,7 +86,7 @@ public class MainActivity extends Activity {
     private AlertDialog settingsDialog;
 
     private interface ResultCallback {
-        void onResult(boolean ok, String message);
+        void onResult(boolean ok, String message, String cookie);
     }
 
     @Override
@@ -96,7 +99,7 @@ public class MainActivity extends Activity {
         }
         prefs = getSharedPreferences(PREFS_NAME, MODE_PRIVATE);
         loadPreferences();
-        if (serverUrl.isEmpty()) {
+        if (serverUrl.isEmpty() || !loggedIn) {
             showSetupScreen();
         } else {
             showWebScreen();
@@ -107,6 +110,7 @@ public class MainActivity extends Activity {
         serverUrl = prefs.getString(KEY_SERVER, "");
         username = prefs.getString(KEY_USERNAME, "");
         password = prefs.getString(KEY_PASSWORD, "");
+        loggedIn = prefs.getBoolean(KEY_LOGGED_IN, false);
     }
 
     private void savePreferences() {
@@ -114,6 +118,7 @@ public class MainActivity extends Activity {
                 .putString(KEY_SERVER, serverUrl)
                 .putString(KEY_USERNAME, username)
                 .putString(KEY_PASSWORD, password)
+                .putBoolean(KEY_LOGGED_IN, loggedIn)
                 .apply();
     }
 
@@ -145,7 +150,7 @@ public class MainActivity extends Activity {
         WebView oldWebView = webView;
         webView = null;
         setupScreen = true;
-        setTitle("连接 FocusBox");
+        setTitle("登录 · FocusBox");
         setContentView(buildSetupView());
         if (oldWebView != null) {
             oldWebView.stopLoading();
@@ -204,7 +209,7 @@ public class MainActivity extends Activity {
                 InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_VARIATION_URI,
                 "http://192.168.1.20:8083");
         urlInput.setText(serverUrl);
-        addField(card, "服务器地址", urlInput);
+        addField(card, "服务器 IP / 地址", urlInput);
 
         final EditText userInput = createInput(
                 InputType.TYPE_CLASS_TEXT,
@@ -229,7 +234,7 @@ public class MainActivity extends Activity {
         card.addView(formError, errorLp);
 
         final Button connectButton = new Button(this);
-        connectButton.setText("连接并保存");
+        connectButton.setText("登录");
         connectButton.setTextSize(16);
         connectButton.setTextColor(Color.WHITE);
         connectButton.setAllCaps(false);
@@ -244,7 +249,8 @@ public class MainActivity extends Activity {
         card.addView(connectButton, buttonLp);
 
         TextView note = new TextView(this);
-        note.setText("登录后与在浏览器中访问同一地址完全一致，可以查看和修改全部数据。\n"
+        note.setText("填写服务器 IP / 地址（例如 http://192.168.1.20:8083）、用户名和密码后登录。\n"
+                + "退出登录后可在这里更换服务器或账号。\n"
                 + "如果服务器未启用登录，用户名和密码可以留空。\n"
                 + "凭据仅保存在本机；公网访问请使用 HTTPS。");
         note.setTextSize(12);
@@ -275,10 +281,10 @@ public class MainActivity extends Activity {
                 hideKeyboard(v);
                 formError.setVisibility(View.GONE);
                 connectButton.setEnabled(false);
-                connectButton.setText("连接中…");
+                connectButton.setText("登录中…");
                 testConnection(url, user, pass, new ResultCallback() {
                     @Override
-                    public void onResult(final boolean ok, final String message) {
+                    public void onResult(final boolean ok, final String message, final String cookie) {
                         runOnUiThread(new Runnable() {
                             @Override
                             public void run() {
@@ -286,12 +292,14 @@ public class MainActivity extends Activity {
                                     return;
                                 }
                                 connectButton.setEnabled(true);
-                                connectButton.setText("连接并保存");
+                                connectButton.setText("登录");
                                 if (ok) {
                                     serverUrl = url;
                                     username = user;
                                     password = pass;
+                                    loggedIn = true;
                                     savePreferences();
+                                    applySessionCookie(url, cookie);
                                     showWebScreen();
                                 } else {
                                     showFormError(formError, message);
@@ -361,7 +369,7 @@ public class MainActivity extends Activity {
         settings.setMixedContentMode(WebSettings.MIXED_CONTENT_COMPATIBILITY_MODE);
         settings.setCacheMode(WebSettings.LOAD_DEFAULT);
         settings.setMediaPlaybackRequiresUserGesture(true);
-        settings.setUserAgentString(settings.getUserAgentString() + " FocusBoxAndroid/1.0.4");
+        settings.setUserAgentString(settings.getUserAgentString() + " FocusBoxAndroid/1.0.5");
 
         webView.setBackgroundColor(Color.WHITE);
         webView.setOverScrollMode(View.OVER_SCROLL_IF_CONTENT_SCROLLS);
@@ -600,7 +608,7 @@ public class MainActivity extends Activity {
                 InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_VARIATION_URI,
                 "http://192.168.1.20:8083");
         urlInput.setText(serverUrl);
-        addField(form, "服务器地址", urlInput);
+        addField(form, "服务器 IP / 地址", urlInput);
 
         final EditText userInput = createInput(
                 InputType.TYPE_CLASS_TEXT,
@@ -625,7 +633,7 @@ public class MainActivity extends Activity {
         form.addView(formError, errorLp);
 
         final AlertDialog dialog = new AlertDialog.Builder(this)
-                .setTitle("服务器设置")
+                .setTitle("服务器与账号")
                 .setView(scroll)
                 .setNegativeButton("取消", null)
                 .setPositiveButton("保存并连接", null)
@@ -658,7 +666,8 @@ public class MainActivity extends Activity {
                         saveButton.setText("连接中…");
                         testConnection(url, user, pass, new ResultCallback() {
                             @Override
-                            public void onResult(final boolean ok, final String message) {
+                            public void onResult(final boolean ok, final String message,
+                                                 final String cookie) {
                                 runOnUiThread(new Runnable() {
                                     @Override
                                     public void run() {
@@ -674,7 +683,9 @@ public class MainActivity extends Activity {
                                         serverUrl = url;
                                         username = user;
                                         password = pass;
+                                        loggedIn = true;
                                         savePreferences();
+                                        applySessionCookie(url, cookie);
                                         try {
                                             WebViewDatabase.getInstance(MainActivity.this)
                                                     .clearHttpAuthUsernamePassword();
@@ -705,30 +716,37 @@ public class MainActivity extends Activity {
             public void run() {
                 HttpURLConnection connection = null;
                 try {
-                    URL url = new URL(baseUrl + "/");
+                    URL url = new URL(baseUrl + "/api/auth/login");
                     connection = (HttpURLConnection) url.openConnection();
                     connection.setConnectTimeout(8000);
                     connection.setReadTimeout(12000);
                     connection.setInstanceFollowRedirects(true);
-                    connection.setRequestMethod("GET");
-                    connection.setRequestProperty("Accept", "text/html,application/json;q=0.9,*/*;q=0.8");
-                    if (!TextUtils.isEmpty(user) || !TextUtils.isEmpty(pass)) {
-                        String token = Base64.encodeToString(
-                                (user + ":" + pass).getBytes(StandardCharsets.UTF_8),
-                                Base64.NO_WRAP);
-                        connection.setRequestProperty("Authorization", "Basic " + token);
+                    connection.setRequestMethod("POST");
+                    connection.setDoOutput(true);
+                    connection.setRequestProperty("Content-Type", "application/json; charset=UTF-8");
+                    connection.setRequestProperty("Accept", "application/json");
+                    String body = "{\"username\":\"" + jsonEscape(user)
+                            + "\",\"password\":\"" + jsonEscape(pass) + "\"}";
+                    byte[] payload = body.getBytes(StandardCharsets.UTF_8);
+                    connection.setFixedLengthStreamingMode(payload.length);
+                    OutputStream output = connection.getOutputStream();
+                    try {
+                        output.write(payload);
+                    } finally {
+                        output.close();
                     }
                     int code = connection.getResponseCode();
-                    if (code >= 200 && code < 400) {
-                        callback.onResult(true, "");
+                    String cookie = connection.getHeaderField("Set-Cookie");
+                    if (code >= 200 && code < 300) {
+                        callback.onResult(true, "", cookie);
                     } else if (code == 401) {
-                        callback.onResult(false, "用户名或密码错误（服务器返回 401）。");
+                        callback.onResult(false, "用户名或密码错误。", null);
                     } else if (code == 403) {
-                        callback.onResult(false, "服务器拒绝访问（403）。");
+                        callback.onResult(false, "服务器拒绝访问（403）。", null);
                     } else if (code == 404) {
-                        callback.onResult(false, "服务器可达，但该地址返回 404，请检查端口或路径。");
+                        callback.onResult(false, "服务器可达，但未找到登录接口，请确认服务端版本。", null);
                     } else {
-                        callback.onResult(false, "服务器返回 HTTP " + code + "。");
+                        callback.onResult(false, "服务器返回 HTTP " + code + "。", null);
                     }
                 } catch (Exception e) {
                     String message = e.getMessage();
@@ -739,7 +757,7 @@ public class MainActivity extends Activity {
                     if (e instanceof javax.net.ssl.SSLException) {
                         hint = "\n如果是自签名 HTTPS 证书，请改用 http 或为服务器配置有效证书。";
                     }
-                    callback.onResult(false, "无法连接服务器：" + message + hint);
+                    callback.onResult(false, "无法连接服务器：" + message + hint, null);
                 } finally {
                     if (connection != null) {
                         connection.disconnect();
@@ -747,6 +765,68 @@ public class MainActivity extends Activity {
                 }
             }
         }).start();
+    }
+
+    private static String jsonEscape(String value) {
+        if (value == null) {
+            return "";
+        }
+        return value.replace("\\", "\\\\")
+                .replace("\"", "\\\"")
+                .replace("\n", "\\n")
+                .replace("\r", "\\r")
+                .replace("\t", "\\t");
+    }
+
+    private void applySessionCookie(String baseUrl, String cookie) {
+        if (TextUtils.isEmpty(cookie)) {
+            return;
+        }
+        String pair = cookie.split(";", 2)[0];
+        CookieManager cookieManager = CookieManager.getInstance();
+        cookieManager.setAcceptCookie(true);
+        cookieManager.setCookie(baseUrl + "/", pair);
+        cookieManager.flush();
+    }
+
+    private void performLogout() {
+        final String url = serverUrl;
+        new Thread(new Runnable() {
+            @Override
+            public void run() {
+                HttpURLConnection connection = null;
+                try {
+                    connection = (HttpURLConnection) new URL(url + "/api/auth/logout").openConnection();
+                    connection.setConnectTimeout(5000);
+                    connection.setReadTimeout(5000);
+                    connection.setRequestMethod("POST");
+                    connection.getResponseCode();
+                } catch (Exception ignored) {
+                } finally {
+                    if (connection != null) {
+                        connection.disconnect();
+                    }
+                }
+            }
+        }).start();
+
+        username = "";
+        password = "";
+        loggedIn = false;
+        savePreferences();
+
+        CookieManager cookieManager = CookieManager.getInstance();
+        cookieManager.removeAllCookies(null);
+        cookieManager.flush();
+        try {
+            WebViewDatabase.getInstance(this).clearHttpAuthUsernamePassword();
+        } catch (Exception ignored) {
+        }
+        if (settingsDialog != null && settingsDialog.isShowing()) {
+            settingsDialog.dismiss();
+        }
+        showSetupScreen();
+        Toast.makeText(this, "已退出登录", Toast.LENGTH_SHORT).show();
     }
 
     private EditText createInput(int inputType, String hint) {
@@ -821,6 +901,8 @@ public class MainActivity extends Activity {
                 .setShowAsAction(MenuItem.SHOW_AS_ACTION_NEVER);
         menu.add(Menu.NONE, MENU_SETTINGS, 1, "服务器设置")
                 .setShowAsAction(MenuItem.SHOW_AS_ACTION_NEVER);
+        menu.add(Menu.NONE, MENU_LOGOUT, 2, "退出登录")
+                .setShowAsAction(MenuItem.SHOW_AS_ACTION_NEVER);
         return true;
     }
 
@@ -829,11 +911,15 @@ public class MainActivity extends Activity {
         boolean hasWebView = webView != null && !setupScreen;
         MenuItem refresh = menu.findItem(MENU_REFRESH);
         MenuItem settings = menu.findItem(MENU_SETTINGS);
+        MenuItem logout = menu.findItem(MENU_LOGOUT);
         if (refresh != null) {
             refresh.setVisible(hasWebView);
         }
         if (settings != null) {
             settings.setVisible(hasWebView);
+        }
+        if (logout != null) {
+            logout.setVisible(hasWebView);
         }
         return super.onPrepareOptionsMenu(menu);
     }
@@ -848,6 +934,10 @@ public class MainActivity extends Activity {
         }
         if (item.getItemId() == MENU_SETTINGS) {
             showSettingsDialog();
+            return true;
+        }
+        if (item.getItemId() == MENU_LOGOUT) {
+            performLogout();
             return true;
         }
         return super.onOptionsItemSelected(item);

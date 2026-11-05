@@ -39,6 +39,7 @@ db.exec(`
     notes TEXT NOT NULL DEFAULT '',
     priority INTEGER NOT NULL DEFAULT 0,
     status TEXT NOT NULL DEFAULT 'open',
+    start_date TEXT,
     due_date TEXT,
     estimate_minutes INTEGER NOT NULL DEFAULT 0,
     completed_at TEXT,
@@ -87,6 +88,15 @@ db.exec(`
     value TEXT NOT NULL
   );
 
+  -- 登录会话，与专注记录表 sessions 区分开。
+  CREATE TABLE IF NOT EXISTS auth_sessions (
+    token TEXT PRIMARY KEY,
+    username TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    expires_at TEXT NOT NULL
+  );
+
+  CREATE INDEX IF NOT EXISTS idx_auth_sessions_expires ON auth_sessions(expires_at);
   CREATE INDEX IF NOT EXISTS idx_tasks_status ON tasks(status);
   CREATE INDEX IF NOT EXISTS idx_tasks_due ON tasks(due_date);
   CREATE INDEX IF NOT EXISTS idx_sessions_ended ON sessions(ended_at);
@@ -94,6 +104,14 @@ db.exec(`
   CREATE INDEX IF NOT EXISTS idx_subtasks_task ON subtasks(task_id);
   CREATE INDEX IF NOT EXISTS idx_memos_created ON memos(created_at);
 `);
+
+// 旧版本数据库没有 start_date 列，启动时补列并把已有任务的开始日期回填为创建当天。
+const taskColumns = db.prepare('PRAGMA table_info(tasks)').all();
+if (!taskColumns.some((column) => column.name === 'start_date')) {
+  db.exec('ALTER TABLE tasks ADD COLUMN start_date TEXT');
+  db.exec("UPDATE tasks SET start_date = substr(created_at, 1, 10) WHERE start_date IS NULL");
+}
+db.exec('CREATE INDEX IF NOT EXISTS idx_tasks_start ON tasks(start_date)');
 
 const SETTINGS_DEFAULTS = Object.freeze({
   focusMinutes: 25,

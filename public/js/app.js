@@ -6,6 +6,7 @@ import { configure as configureTimer, init as initTimer, subscribe as subscribeT
 import { toast } from './components.js';
 import { esc, todayStr, tzOffset, formatFocus } from './utils.js';
 import { startRouter } from './router.js';
+import { render as renderLogin } from './views/login.js';
 
 const NAV_SECTIONS = [
   {
@@ -31,6 +32,24 @@ const NAV_SECTIONS = [
 
 let settings = { ...DEFAULT_SETTINGS };
 let badges = { openTasks: 0, todayTasks: 0, memos: 0, focusTodaySeconds: 0 };
+let authState = { enabled: false, authenticated: true, username: '' };
+let authRedirecting = false;
+
+// 登录成功或会话失效后重新加载，让 boot 按最新的登录状态决定显示登录页还是应用外壳。
+function redirectToLogin() {
+  if (authRedirecting) return;
+  authRedirecting = true;
+  location.reload();
+}
+bus.on('auth-changed', redirectToLogin);
+bus.on('auth-required', redirectToLogin);
+
+function showLogin() {
+  const root = document.getElementById('app');
+  if (!root) return;
+  renderLogin(root);
+  document.body.classList.add('ready');
+}
 
 function navHtml() {
   return NAV_SECTIONS.map(
@@ -66,8 +85,9 @@ function shellHtml() {
         <nav class="nav">${navHtml()}</nav>
         <div class="sidebar-foot">
           <div class="mini-timer" id="mini-timer" hidden></div>
+          ${authState.enabled ? `<button type="button" class="btn btn-ghost btn-block logout-btn" id="logout-btn">${icon('logout', 16)}退出登录</button>` : ''}
           <div class="sidebar-meta">
-            <span>v1.0.4</span>
+            <span>v1.0.5</span>
             <span class="dot-sep">·</span>
             <span>自托管</span>
           </div>
@@ -149,6 +169,15 @@ function bindShell() {
     saveTheme(currentTheme() === 'dark' ? 'light' : 'dark');
   });
 
+  document.getElementById('logout-btn')?.addEventListener('click', async () => {
+    try {
+      await api.post('/api/auth/logout');
+    } catch (_) {
+      /* 接口失败时也回到登录页 */
+    }
+    bus.emit('auth-changed');
+  });
+
   document.getElementById('mini-timer')?.addEventListener('click', (event) => {
     if (event.target.closest('[data-action="toggle"]')) {
       event.preventDefault();
@@ -196,6 +225,17 @@ async function loadBadges() {
 }
 
 async function boot() {
+  try {
+    authState = await api.get('/api/auth/status');
+  } catch (error) {
+    toast(`无法确认登录状态：${error.message}`, 'error');
+  }
+
+  if (authState.enabled && !authState.authenticated) {
+    showLogin();
+    return;
+  }
+
   document.getElementById('app').innerHTML = shellHtml();
 
   try {

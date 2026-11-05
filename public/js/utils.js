@@ -135,6 +135,29 @@ export function dueLabel(dateString) {
   return { text: formatDateShort(dateString), tone: 'normal' };
 }
 
+// 「某天落在任务的开始日期～截止日期区间内」的统一判定。
+// 未设置开始日期视为不受下界限制，未设置截止日期视为不受上界限制。
+export function isTaskOnDate(task, date = todayStr()) {
+  const started = !task.startDate || task.startDate <= date;
+  const notEnded = !task.dueDate || task.dueDate >= date;
+  return started && notEnded;
+}
+
+export function isTaskOverdue(task, date = todayStr()) {
+  return Boolean(task.dueDate) && task.dueDate < date;
+}
+
+export function isTaskUpcoming(task, date = todayStr()) {
+  return Boolean(task.startDate) && task.startDate > date;
+}
+
+export function dateBadge(task, date = todayStr()) {
+  if (isTaskUpcoming(task, date)) {
+    return { text: `${formatDateShort(task.startDate)} 开始`, tone: 'normal' };
+  }
+  return dueLabel(task.dueDate);
+}
+
 export function greeting() {
   const hour = new Date().getHours();
   if (hour < 5) return '夜深了';

@@ -2,11 +2,11 @@
 
 const path = require('node:path');
 const fs = require('node:fs');
-const crypto = require('node:crypto');
 const express = require('express');
 
 const { db, DB_FILE } = require('./db');
 const { seedIfNeeded } = require('./seed');
+const auth = require('./auth');
 
 const app = express();
 const PORT = Number(process.env.PORT) || 3000;
@@ -14,21 +14,8 @@ const HOST = process.env.HOST || '0.0.0.0';
 const PUBLIC_DIR = path.join(__dirname, '..', 'public');
 const packageInfo = JSON.parse(fs.readFileSync(path.join(__dirname, '..', 'package.json'), 'utf8'));
 
-// 可选访问认证：设置 FOCUSBOX_USERNAME / FOCUSBOX_PASSWORD 后启用 HTTP Basic Auth。
-// 不设置时保持原来的单用户无登录模式，兼容直接运行与旧版部署。
-const AUTH_USERNAME = process.env.FOCUSBOX_USERNAME || '';
-const AUTH_PASSWORD = process.env.FOCUSBOX_PASSWORD || '';
-const AUTH_ENABLED = Boolean(AUTH_USERNAME && AUTH_PASSWORD);
-
 // 默认只允许同源 iframe；飞牛安装包会把它放宽到 http:/https:，以便桌面窗口嵌入。
 const FRAME_ANCESTORS = process.env.FOCUSBOX_FRAME_ANCESTORS || "'self'";
-
-function safeEqual(left, right) {
-  const a = Buffer.from(String(left));
-  const b = Buffer.from(String(right));
-  if (a.length !== b.length) return false;
-  return crypto.timingSafeEqual(a, b);
-}
 
 seedIfNeeded();
 
@@ -43,41 +30,18 @@ app.use((req, res, next) => {
   next();
 });
 
-if (AUTH_ENABLED) {
-  app.use((req, res, next) => {
-    // 健康检查保持匿名，供 Docker / fnOS 探活使用。
-    if (req.path === '/api/health') return next();
-
-    const header = req.headers.authorization || '';
-    const match = /^Basic\s+(.+)$/i.exec(header);
-    if (match) {
-      let decoded = '';
-      try {
-        decoded = Buffer.from(match[1], 'base64').toString('utf8');
-      } catch (_) {
-        /* 忽略非法的 Authorization 头 */
-      }
-      const separator = decoded.indexOf(':');
-      if (separator !== -1) {
-        const username = decoded.slice(0, separator);
-        const password = decoded.slice(separator + 1);
-        if (safeEqual(username, AUTH_USERNAME) && safeEqual(password, AUTH_PASSWORD)) {
-          return next();
-        }
-      }
-    }
-
-    res.setHeader('WWW-Authenticate', 'Basic realm="FocusBox", charset="UTF-8"');
-    res.status(401).json({ error: '需要登录' });
-  });
-}
-
 app.use(express.json({ limit: '10mb' }));
 
 app.get('/api/health', (req, res) => {
   const row = db.prepare('SELECT 1 AS ok').get();
   res.json({ status: 'ok', app: 'focusbox', version: packageInfo.version, database: row.ok === 1 });
 });
+
+// 登录状态、登录、登出保持匿名，供登录页与探活使用。
+app.use('/api/auth', require('./routes/auth'));
+
+// 其余业务接口需要登录；页面和静态资源匿名，由前端登录视图负责拦截。
+app.use(auth.requireAuth);
 
 app.use('/api/projects', require('./routes/projects').router);
 app.use('/api/tasks', require('./routes/tasks'));
@@ -125,7 +89,7 @@ app.use((err, req, res, next) => {
 const server = app.listen(PORT, HOST, () => {
   console.log(`专注盒子已启动: http://${HOST}:${PORT}`);
   console.log(`数据库文件: ${DB_FILE}`);
-  if (AUTH_ENABLED) console.log(`已启用访问认证，用户名: ${AUTH_USERNAME}`);
+  if (auth.AUTH_ENABLED) console.log(`已启用登录认证，用户名: ${auth.AUTH_USERNAME}`);
 });
 
 function shutdown(signal) {

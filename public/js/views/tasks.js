@@ -9,7 +9,9 @@ import {
   formatFocus,
   formatMinutes,
   formatDateTime,
-  dueLabel,
+  dateBadge,
+  isTaskOnDate,
+  isTaskOverdue,
   priorityMeta,
   relativeTime,
   debounce,
@@ -21,6 +23,20 @@ const PRIORITIES = [
   { value: 2, label: '中' },
   { value: 3, label: '高' },
 ];
+
+const DRAFT_FIELDS = ['title', 'projectId', 'startDate', 'dueDate', 'estimateMinutes', 'notes'];
+
+function draftFromTask(task) {
+  return {
+    title: task.title || '',
+    projectId: task.projectId == null ? '' : String(task.projectId),
+    startDate: task.startDate || '',
+    dueDate: task.dueDate || '',
+    estimateMinutes: task.estimateMinutes ? String(task.estimateMinutes) : '',
+    notes: task.notes || '',
+    priority: Number(task.priority) || 0,
+  };
+}
 
 let cache = {
   projects: [],
@@ -53,9 +69,9 @@ function filterTasks() {
 
   if (filters.status === 'open') tasks = tasks.filter((task) => task.status === 'open');
   else if (filters.status === 'done') tasks = tasks.filter((task) => task.status === 'done');
-  else if (filters.status === 'today') tasks = tasks.filter((task) => task.status === 'open' && task.dueDate === today);
+  else if (filters.status === 'today') tasks = tasks.filter((task) => task.status === 'open' && isTaskOnDate(task, today));
   else if (filters.status === 'overdue') {
-    tasks = tasks.filter((task) => task.status === 'open' && task.dueDate && task.dueDate < today);
+    tasks = tasks.filter((task) => task.status === 'open' && isTaskOverdue(task, today));
   }
 
   if (filters.priority !== '') tasks = tasks.filter((task) => task.priority === Number(filters.priority));
@@ -70,7 +86,7 @@ function filterTasks() {
 }
 
 function taskRowHtml(task) {
-  const due = dueLabel(task.dueDate);
+  const due = dateBadge(task);
   const priority = priorityMeta(task.priority);
   const totalSeconds = (task.focusSeconds || 0) + (task.manualMinutes || 0) * 60;
   const done = task.status === 'done';
@@ -121,6 +137,11 @@ function emptyListHtml() {
 }
 
 export async function render(container) {
+  const controller = new AbortController();
+  const { signal } = controller;
+  let disposed = false;
+  let forceCloseActiveDrawer = null;
+
   const [projectData, taskData] = await Promise.all([
     api.get('/api/projects'),
     api.get('/api/tasks?status=all'),
@@ -179,7 +200,7 @@ export async function render(container) {
   function renderProjectTabs() {
     const openCount = cache.tasks.filter((task) => task.status === 'open').length;
     const today = todayStr();
-    const todayCount = cache.tasks.filter((task) => task.status === 'open' && task.dueDate === today).length;
+    const todayCount = cache.tasks.filter((task) => task.status === 'open' && isTaskOnDate(task, today)).length;
     const chips = [
       `<button type="button" class="chip ${filters.project === 'all' && filters.status !== 'today' ? 'active' : ''}" data-project="all">全部<span class="chip-count">${openCount}</span></button>`,
       `<button type="button" class="chip ${filters.status === 'today' ? 'active' : ''}" data-project="today">今天<span class="chip-count">${todayCount}</span></button>`,
@@ -211,7 +232,7 @@ export async function render(container) {
       list.innerHTML = emptyListHtml();
       return;
     }
-    const overdue = tasks.filter((task) => task.status === 'open' && task.dueDate && task.dueDate < todayStr()).length;
+    const overdue = tasks.filter((task) => task.status === 'open' && isTaskOverdue(task)).length;
     list.innerHTML = `
       <div class="list-summary">
         <span>共 ${tasks.length} 个任务</span>
@@ -228,21 +249,16 @@ export async function render(container) {
 
   renderAll();
 
-  async function refreshData({ rerender = true } = {}) {
-    const [projectData, taskData] = await Promise.all([
+  // 任何写操作后都从服务端重新拉取数据并完整重绘，避免页面停留在旧数据。
+  async function refreshData() {
+    const [nextProjects, nextTasks] = await Promise.all([
       api.get('/api/projects'),
       api.get('/api/tasks?status=all'),
     ]);
-    cache.projects = projectData.projects || [];
-    cache.palette = projectData.palette || cache.palette;
-    cache.tasks = taskData.tasks || [];
-    if (rerender) renderAll();
-  }
-
-  function updateCachedTask(task) {
-    const index = cache.tasks.findIndex((item) => item.id === task.id);
-    if (index >= 0) cache.tasks[index] = task;
-    else cache.tasks.unshift(task);
+    if (disposed) return;
+    cache.projects = nextProjects.projects || [];
+    cache.palette = nextProjects.palette || cache.palette;
+    cache.tasks = nextTasks.tasks || [];
     renderAll();
   }
 
@@ -295,6 +311,10 @@ export async function render(container) {
               <select class="select" name="projectId">${projectOptions(projectDefault)}</select>
             </label>
             <label class="field">
+              <span>开始日期</span>
+              <input class="input" type="date" name="startDate" value="${todayStr()}" />
+            </label>
+            <label class="field">
               <span>截止日期</span>
               <input class="input" type="date" name="dueDate" />
             </label>
@@ -330,13 +350,21 @@ export async function render(container) {
             form.elements.title.focus();
             return;
           }
+          const startDate = String(data.get('startDate') || todayStr());
+          const dueDate = data.get('dueDate') || null;
+          if (dueDate && startDate > dueDate) {
+            toast('开始日期不能晚于截止日期', 'error');
+            form.elements.startDate.focus();
+            return;
+          }
           const submit = form.querySelector('[type="submit"]');
           submit.disabled = true;
           try {
             await api.post('/api/tasks', {
               title,
               projectId: data.get('projectId') || null,
-              dueDate: data.get('dueDate') || null,
+              startDate,
+              dueDate,
               priority: Number(data.get('priority')) || 0,
               estimateMinutes: Number(data.get('estimateMinutes')) || 0,
               notes: String(data.get('notes') || ''),
@@ -441,8 +469,8 @@ export async function render(container) {
             }
             try {
               await api.patch(`/api/projects/${projectId}`, { name, color });
-              await refreshData({ rerender: false });
-              renderProjectTabs();
+              await refreshData();
+              renderProjects();
               toast('项目已更新', 'success');
             } catch (error) {
               toast(error.message, 'error');
@@ -458,6 +486,7 @@ export async function render(container) {
             if (!confirmed) return;
             try {
               await api.delete(`/api/projects/${projectId}`);
+              if (String(filters.project) === String(projectId)) filters.project = 'all';
               await refreshData();
               renderProjects();
               bus.emit('badges-refresh');
@@ -488,50 +517,191 @@ export async function render(container) {
       sessions: data.sessions || [],
     };
 
+    let draft = draftFromTask(state.task);
+    let saved = draftFromTask(state.task);
+    let forceClose = false;
+    let confirmingClose = false;
+    let closeDrawer = null;
+    const subtaskDrafts = new Map();
+
+    function isDirty() {
+      return (
+        DRAFT_FIELDS.some((name) => String(draft[name]) !== String(saved[name])) ||
+        Number(draft.priority) !== Number(saved.priority)
+      );
+    }
+
+    function hasSubtaskChanges() {
+      return state.subtasks.some((subtask) => {
+        const value = subtaskDrafts.get(subtask.id);
+        return value !== undefined && value !== subtask.title;
+      });
+    }
+
     openDrawer({
       title: '任务详情',
-      subtitle: '修改会自动保存',
+      subtitle: '修改后点击「保存修改」按钮生效',
       body: `<div id="task-detail"></div>`,
+      onBeforeClose() {
+        if (forceClose || (!isDirty() && !hasSubtaskChanges())) return true;
+        if (confirmingClose) return false;
+        confirmingClose = true;
+        confirmDialog({
+          title: '放弃未保存的修改？',
+          message: '任务详情或子任务中有尚未保存的修改，关闭后会丢失这些修改。',
+          confirmText: '放弃修改',
+          cancelText: '继续编辑',
+          danger: true,
+        }).then((confirmed) => {
+          confirmingClose = false;
+          if (confirmed) {
+            forceClose = true;
+            closeDrawer?.();
+          }
+        });
+        return false;
+      },
       onClose() {
+        forceCloseActiveDrawer = null;
         if (location.hash.includes('?task=')) history.replaceState(null, '', '#/tasks');
         bus.emit('badges-refresh');
         refreshData().catch(() => {});
       },
       onMount(root, close) {
         const detail = root.querySelector('#task-detail');
-        const saveHint = () => detail.querySelector('#save-hint');
-        let saveTimer = null;
-
-        const markSaved = (error) => {
-          const hint = saveHint();
-          if (!hint) return;
-          hint.classList.toggle('error', Boolean(error));
-          hint.textContent = error ? `保存失败：${error}` : `已保存 ${new Date().toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' })}`;
+        closeDrawer = close;
+        forceCloseActiveDrawer = () => {
+          forceClose = true;
+          closeDrawer?.();
         };
+        let saving = false;
+        let saveError = '';
 
-        const save = debounce(async (patch) => {
+        const field = (name) => detail.querySelector(`#task-fields [name="${name}"]`);
+
+        function collectDraft() {
+          DRAFT_FIELDS.forEach((name) => {
+            const element = field(name);
+            if (element) draft[name] = element.value;
+          });
+        }
+
+        function updateSaveState() {
+          const hint = detail.querySelector('#save-hint');
+          const button = detail.querySelector('[data-action="save-task"]');
+          if (!hint || !button) return;
+          const dirty = isDirty();
+          hint.classList.toggle('error', Boolean(saveError));
+          hint.classList.toggle('unsaved', !saveError && !saving && dirty);
+          if (saveError) hint.textContent = `保存失败：${saveError}`;
+          else if (saving) hint.textContent = '正在保存…';
+          else if (dirty) hint.textContent = '有未保存的修改';
+          else hint.textContent = '所有修改已保存';
+          button.disabled = saving || !dirty;
+        }
+
+        async function syncList() {
           try {
-            const result = await api.patch(`/api/tasks/${taskId}`, patch);
+            await refreshData();
+          } catch (_) {
+            /* 列表刷新失败时保留当前显示 */
+          }
+          bus.emit('badges-refresh');
+        }
+
+        async function saveTask() {
+          collectDraft();
+          if (saving || !isDirty()) return;
+          const title = draft.title.trim();
+          if (!title) {
+            field('title')?.focus();
+            toast('任务标题不能为空', 'error');
+            return;
+          }
+          if (draft.startDate && draft.dueDate && draft.startDate > draft.dueDate) {
+            field('startDate')?.focus();
+            toast('开始日期不能晚于截止日期', 'error');
+            return;
+          }
+          saving = true;
+          saveError = '';
+          updateSaveState();
+          try {
+            const result = await api.patch(`/api/tasks/${taskId}`, {
+              title,
+              projectId: draft.projectId || null,
+              startDate: draft.startDate || null,
+              dueDate: draft.dueDate || null,
+              estimateMinutes: Number(draft.estimateMinutes) || 0,
+              notes: draft.notes,
+              priority: Number(draft.priority) || 0,
+            });
             state.task = result.task;
-            updateCachedTask(result.task);
-            markSaved();
-            bus.emit('badges-refresh');
+            saved = draftFromTask(state.task);
+            draft = { ...saved };
+            render();
+            syncList();
+            toast('任务已保存', 'success');
           } catch (error) {
-            markSaved(error.message);
+            saveError = error.message;
+            toast(error.message, 'error');
+          } finally {
+            saving = false;
+            updateSaveState();
+          }
+        }
+
+        async function saveSubtask(subtaskId) {
+          const subtask = state.subtasks.find((item) => item.id === subtaskId);
+          const row = detail.querySelector(`[data-subtask-id="${subtaskId}"]`);
+          const input = row?.querySelector('[data-field="subtask-title"]');
+          const button = row?.querySelector('[data-action="save-subtask"]');
+          if (!subtask || !input || !button) return;
+          const title = input.value.trim();
+          if (!title) {
+            toast('子任务内容不能为空', 'error');
+            input.focus();
+            return;
+          }
+          const clearDraft = () => {
+            subtaskDrafts.delete(subtaskId);
+            row.classList.remove('is-edited');
+            button.disabled = true;
+          };
+          if (title === subtask.title) {
+            input.value = title;
+            clearDraft();
+            return;
+          }
+          button.disabled = true;
+          try {
+            const result = await api.patch(`/api/tasks/subtasks/${subtaskId}`, { title });
+            subtask.title = result.subtask.title;
+            input.value = subtask.title;
+            clearDraft();
+            toast('子任务已更新', 'success', 1600);
+            syncList();
+          } catch (error) {
+            button.disabled = false;
             toast(error.message, 'error');
           }
-        }, 500);
+        }
 
-        const subtaskHtml = (subtask) => `
-          <div class="subtask-row ${subtask.done ? 'done' : ''}" data-subtask-id="${subtask.id}">
+        const subtaskHtml = (subtask) => {
+          const value = subtaskDrafts.has(subtask.id) ? subtaskDrafts.get(subtask.id) : subtask.title;
+          const edited = value !== subtask.title;
+          return `
+          <div class="subtask-row ${subtask.done ? 'done' : ''} ${edited ? 'is-edited' : ''}" data-subtask-id="${subtask.id}">
             <label class="subtask-check">
               <input type="checkbox" ${subtask.done ? 'checked' : ''} data-action="toggle-subtask" />
               <span class="check-visual">${icon('check', 11)}</span>
             </label>
-            <span class="subtask-title">${esc(subtask.title)}</span>
+            <input class="subtask-title-input" data-field="subtask-title" value="${esc(value)}" maxlength="300" aria-label="子任务内容" />
+            <button type="button" class="btn btn-icon btn-soft" data-action="save-subtask" title="保存子任务修改" ${edited ? '' : 'disabled'}>${icon('check', 14)}</button>
             <button type="button" class="btn btn-icon btn-ghost danger-hover" data-action="delete-subtask" title="删除子任务">${icon('x', 14)}</button>
           </div>
         `;
+        };
 
         const timeEntryHtml = (entry) => `
           <div class="time-row" data-time-id="${entry.id}">
@@ -552,7 +722,6 @@ export async function render(container) {
 
         function render() {
           const task = state.task;
-          const priority = priorityMeta(task.priority);
           const done = task.status === 'done';
           const focusSeconds = state.sessions
             .filter((session) => session.mode === 'focus' && session.completed)
@@ -561,39 +730,45 @@ export async function render(container) {
           const totalMinutes = Math.round(focusSeconds / 60) + manualMinutes;
 
           detail.innerHTML = `
-            <div class="detail-status">
-              <button type="button" class="check ${done ? 'checked' : ''}" data-action="toggle-status" aria-checked="${done}" aria-label="切换完成状态">${icon('check', 13)}</button>
-              <span>${done ? '已完成' : '进行中'}</span>
-              <span class="detail-meta">创建于 ${formatDateTime(task.createdAt)}</span>
-            </div>
-            <input class="detail-title ${done ? 'done' : ''}" name="title" value="${esc(task.title)}" maxlength="300" aria-label="任务标题" />
-            <div class="detail-grid">
-              <label class="field">
-                <span>所属项目</span>
-                <select class="select" name="projectId">${projectOptions(task.projectId)}</select>
-              </label>
-              <label class="field">
-                <span>截止日期</span>
-                <input class="input" type="date" name="dueDate" value="${esc(task.dueDate || '')}" />
-              </label>
-              <label class="field">
-                <span>预计时长（分钟）</span>
-                <input class="input" type="number" name="estimateMinutes" min="0" max="100000" step="5" value="${task.estimateMinutes || ''}" placeholder="未设置" />
-              </label>
-              <div class="field">
-                <span>优先级</span>
-                <div class="priority-segmented">
-                  ${PRIORITIES.map(
-                    (item) =>
-                      `<button type="button" class="priority-option ${task.priority === item.value ? 'active' : ''}" data-priority="${item.value}" style="--priority-color:${priorityMeta(item.value).color}">${item.label}</button>`
-                  ).join('')}
+            <div id="task-fields" class="task-fields">
+              <div class="detail-status">
+                <button type="button" class="check ${done ? 'checked' : ''}" data-action="toggle-status" aria-checked="${done}" aria-label="切换完成状态">${icon('check', 13)}</button>
+                <span>${done ? '已完成' : '进行中'}</span>
+                <span class="detail-meta">创建于 ${formatDateTime(task.createdAt)}</span>
+              </div>
+              <input class="detail-title ${done ? 'done' : ''}" name="title" value="${esc(draft.title)}" maxlength="300" aria-label="任务标题" />
+              <div class="detail-grid">
+                <label class="field">
+                  <span>所属项目</span>
+                  <select class="select" name="projectId">${projectOptions(draft.projectId)}</select>
+                </label>
+                <label class="field">
+                  <span>预计时长（分钟）</span>
+                  <input class="input" type="number" name="estimateMinutes" min="0" max="100000" step="5" value="${esc(draft.estimateMinutes)}" placeholder="未设置" />
+                </label>
+                <label class="field">
+                  <span>开始日期</span>
+                  <input class="input" type="date" name="startDate" value="${esc(draft.startDate)}" />
+                </label>
+                <label class="field">
+                  <span>截止日期</span>
+                  <input class="input" type="date" name="dueDate" value="${esc(draft.dueDate)}" />
+                </label>
+                <div class="field">
+                  <span>优先级</span>
+                  <div class="priority-segmented">
+                    ${PRIORITIES.map(
+                      (item) =>
+                        `<button type="button" class="priority-option ${draft.priority === item.value ? 'active' : ''}" data-priority="${item.value}" style="--priority-color:${priorityMeta(item.value).color}">${item.label}</button>`
+                    ).join('')}
+                  </div>
                 </div>
               </div>
+              <label class="field">
+                <span>备注</span>
+                <textarea class="textarea" name="notes" rows="4" maxlength="20000" placeholder="补充说明、参考链接，或者完成任务的标准…">${esc(draft.notes)}</textarea>
+              </label>
             </div>
-            <label class="field">
-              <span>备注</span>
-              <textarea class="textarea" name="notes" rows="4" maxlength="20000" placeholder="补充说明、参考链接，或者完成任务的标准…">${esc(task.notes || '')}</textarea>
-            </label>
 
             <section class="detail-section">
               <div class="detail-section-head">
@@ -630,56 +805,45 @@ export async function render(container) {
 
             <div class="detail-actions">
               <button type="button" class="btn btn-danger-ghost" data-action="delete-task">${icon('trash', 16)}删除任务</button>
-              <span class="save-hint" id="save-hint">修改会自动保存</span>
+              <div class="detail-save-actions">
+                <span class="save-hint" id="save-hint"></span>
+                <button type="button" class="btn btn-primary" data-action="save-task">${icon('check', 16)}保存修改</button>
+              </div>
             </div>
           `;
 
+          detail.querySelector('[data-action="save-task"]').addEventListener('click', saveTask);
+
           detail.querySelector('[data-action="toggle-status"]').addEventListener('click', async () => {
             try {
-              await api.post(`/api/tasks/${taskId}/toggle`);
-              const result = await api.get(`/api/tasks/${taskId}`);
+              const result = await api.post(`/api/tasks/${taskId}/toggle`);
               state.task = result.task;
-              updateCachedTask(result.task);
               render();
-              bus.emit('badges-refresh');
+              syncList();
             } catch (error) {
               toast(error.message, 'error');
             }
           });
 
-          const titleInput = detail.querySelector('[name="title"]');
-          titleInput.addEventListener('input', () => {
-            const value = titleInput.value.trim();
-            if (value) save({ title: value });
-          });
-          titleInput.addEventListener('blur', () => {
-            if (!titleInput.value.trim()) {
-              titleInput.value = state.task.title;
-              toast('任务标题不能为空', 'error');
-            }
-          });
-
-          detail.querySelector('[name="projectId"]').addEventListener('change', (event) => {
-            save({ projectId: event.target.value || null });
-          });
-          detail.querySelector('[name="dueDate"]').addEventListener('change', (event) => {
-            save({ dueDate: event.target.value || null });
-          });
-          detail.querySelector('[name="estimateMinutes"]').addEventListener('change', (event) => {
-            save({ estimateMinutes: Number(event.target.value) || 0 });
-          });
-          detail.querySelector('[name="notes"]').addEventListener('input', (event) => {
-            save({ notes: event.target.value });
+          const onDraftChange = () => {
+            collectDraft();
+            saveError = '';
+            updateSaveState();
+          };
+          DRAFT_FIELDS.forEach((name) => {
+            const element = field(name);
+            if (!element) return;
+            element.addEventListener('input', onDraftChange);
+            element.addEventListener('change', onDraftChange);
           });
 
           detail.querySelectorAll('[data-priority]').forEach((button) => {
             button.addEventListener('click', () => {
-              const value = Number(button.dataset.priority);
-              state.task.priority = value;
+              draft.priority = Number(button.dataset.priority);
               detail.querySelectorAll('[data-priority]').forEach((item) => {
-                item.classList.toggle('active', Number(item.dataset.priority) === value);
+                item.classList.toggle('active', Number(item.dataset.priority) === draft.priority);
               });
-              save({ priority: value });
+              onDraftChange();
             });
           });
 
@@ -692,27 +856,72 @@ export async function render(container) {
               const result = await api.post(`/api/tasks/${taskId}/subtasks`, { title });
               state.subtasks.push(result.subtask);
               render();
-              bus.emit('badges-refresh');
+              syncList();
               detail.querySelector('#subtask-add')?.elements.title.focus();
             } catch (error) {
               toast(error.message, 'error');
             }
           });
 
-          detail.querySelector('.subtask-list').addEventListener('click', async (event) => {
+          const subtaskList = detail.querySelector('.subtask-list');
+
+          subtaskList.addEventListener('click', async (event) => {
             const row = event.target.closest('[data-subtask-id]');
             if (!row) return;
             const subtaskId = Number(row.dataset.subtaskId);
             const action = event.target.closest('[data-action]')?.dataset.action;
+            if (action === 'save-subtask') {
+              await saveSubtask(subtaskId);
+              return;
+            }
+            if (action !== 'delete-subtask') return;
             try {
-              if (action === 'delete-subtask') {
-                await api.delete(`/api/tasks/subtasks/${subtaskId}`);
-                state.subtasks = state.subtasks.filter((item) => item.id !== subtaskId);
-                render();
-                bus.emit('badges-refresh');
-              }
+              await api.delete(`/api/tasks/subtasks/${subtaskId}`);
+              state.subtasks = state.subtasks.filter((item) => item.id !== subtaskId);
+              subtaskDrafts.delete(subtaskId);
+              render();
+              syncList();
             } catch (error) {
               toast(error.message, 'error');
+            }
+          });
+
+          subtaskList.addEventListener('input', (event) => {
+            const input = event.target.closest('[data-field="subtask-title"]');
+            if (!input) return;
+            const row = input.closest('[data-subtask-id]');
+            const subtaskId = Number(row?.dataset.subtaskId);
+            const subtask = state.subtasks.find((item) => item.id === subtaskId);
+            if (!subtask) return;
+            const edited = input.value !== subtask.title;
+            row.classList.toggle('is-edited', edited);
+            const button = row.querySelector('[data-action="save-subtask"]');
+            if (button) button.disabled = !edited;
+            if (edited) subtaskDrafts.set(subtaskId, input.value);
+            else subtaskDrafts.delete(subtaskId);
+          });
+
+          subtaskList.addEventListener('keydown', (event) => {
+            const input = event.target.closest('[data-field="subtask-title"]');
+            if (!input) return;
+            const row = input.closest('[data-subtask-id]');
+            const subtaskId = Number(row?.dataset.subtaskId);
+            const subtask = state.subtasks.find((item) => item.id === subtaskId);
+            if (!subtask) return;
+            if (event.key === 'Escape') {
+              event.preventDefault();
+              event.stopPropagation();
+              input.value = subtask.title;
+              subtaskDrafts.delete(subtaskId);
+              row.classList.remove('is-edited');
+              const button = row.querySelector('[data-action="save-subtask"]');
+              if (button) button.disabled = true;
+              input.blur();
+              return;
+            }
+            if (event.key === 'Enter') {
+              event.preventDefault();
+              saveSubtask(subtaskId);
             }
           });
 
@@ -720,15 +929,16 @@ export async function render(container) {
             const checkbox = event.target.closest('[data-action="toggle-subtask"]');
             if (!checkbox) return;
             const row = checkbox.closest('[data-subtask-id]');
-            const subtaskId = Number(row.dataset.subtaskId);
+            const subtaskId = Number(row?.dataset.subtaskId);
             const subtask = state.subtasks.find((item) => item.id === subtaskId);
             if (!subtask) return;
             try {
               const result = await api.patch(`/api/tasks/subtasks/${subtaskId}`, { done: checkbox.checked });
               subtask.done = result.subtask.done;
               row.classList.toggle('done', subtask.done);
-              detail.querySelector('.detail-section-head span').textContent = `${state.subtasks.filter((item) => item.done).length}/${state.subtasks.length}`;
-              bus.emit('badges-refresh');
+              const counter = detail.querySelector('.detail-section-head span');
+              if (counter) counter.textContent = `${state.subtasks.filter((item) => item.done).length}/${state.subtasks.length}`;
+              syncList();
             } catch (error) {
               checkbox.checked = !checkbox.checked;
               toast(error.message, 'error');
@@ -748,7 +958,7 @@ export async function render(container) {
               const result = await api.post(`/api/tasks/${taskId}/time`, { minutes, note });
               state.timeEntries.unshift(result.timeEntry);
               render();
-              bus.emit('badges-refresh');
+              syncList();
               toast('时间已记录', 'success', 1800);
             } catch (error) {
               toast(error.message, 'error');
@@ -763,7 +973,7 @@ export async function render(container) {
               await api.delete(`/api/tasks/time/${entryId}`);
               state.timeEntries = state.timeEntries.filter((item) => item.id !== entryId);
               render();
-              bus.emit('badges-refresh');
+              syncList();
             } catch (error) {
               toast(error.message, 'error');
             }
@@ -780,14 +990,14 @@ export async function render(container) {
             try {
               await api.delete(`/api/tasks/${taskId}`);
               toast('任务已删除', 'success');
+              forceClose = true;
               close();
-              bus.emit('badges-refresh');
-              await refreshData();
             } catch (error) {
               toast(error.message, 'error');
             }
           });
 
+          updateSaveState();
         }
 
         render();
@@ -795,92 +1005,106 @@ export async function render(container) {
     });
   }
 
-  container.addEventListener('click', async (event) => {
-    const actionTarget = event.target.closest('[data-action]');
-    const action = actionTarget?.dataset.action;
+  container.addEventListener(
+    'click',
+    async (event) => {
+      const actionTarget = event.target.closest('[data-action]');
+      const action = actionTarget?.dataset.action;
 
-    if (action === 'new-task') {
-      openNewTaskModal();
-      return;
-    }
-    if (action === 'manage-projects') {
-      openProjectModal();
-      return;
-    }
-    if (action === 'clear-filters') {
-      filters = { project: 'all', status: 'open', priority: '', search: '' };
-      container.querySelector('#task-search').value = '';
-      container.querySelector('#priority-filter').value = '';
-      container.querySelectorAll('[data-status]').forEach((button) => button.classList.toggle('active', button.dataset.status === 'open'));
-      renderAll();
-      return;
-    }
-
-    const row = event.target.closest('[data-task-id]');
-    if (!row) return;
-    const taskId = Number(row.dataset.taskId);
-    const task = cache.tasks.find((item) => item.id === taskId);
-
-    if (action === 'toggle') {
-      await toggleTask(taskId, task?.status !== 'done');
-    } else if (action === 'focus') {
-      setTimerTask(taskId, task?.title || null);
-      location.hash = '#/pomodoro';
-    } else if (action === 'delete') {
-      const deleted = await deleteTask(taskId);
-      if (deleted) await refreshData();
-    } else if (action === 'open' || event.target.closest('.task-row')) {
-      openTaskDrawer(taskId);
-    }
-  });
-
-  projectTabs.addEventListener('click', (event) => {
-    const chip = event.target.closest('[data-project]');
-    if (!chip) return;
-    const project = chip.dataset.project;
-    if (project === 'today') {
-      filters.project = 'all';
-      filters.status = 'today';
-      container.querySelectorAll('[data-status]').forEach((button) => button.classList.toggle('active', button.dataset.status === 'today'));
-    } else {
-      filters.project = project;
-      if (filters.status === 'today') {
-        filters.status = 'open';
-        container.querySelectorAll('[data-status]').forEach((button) => button.classList.toggle('active', button.dataset.status === 'open'));
+      if (action === 'new-task') {
+        openNewTaskModal();
+        return;
       }
-    }
-    renderAll();
-  });
+      if (action === 'manage-projects') {
+        openProjectModal();
+        return;
+      }
+      if (action === 'clear-filters') {
+        filters = { project: 'all', status: 'open', priority: '', search: '' };
+        container.querySelector('#task-search').value = '';
+        container.querySelector('#priority-filter').value = '';
+        container.querySelectorAll('[data-status]').forEach((button) => button.classList.toggle('active', button.dataset.status === 'open'));
+        renderAll();
+        return;
+      }
 
-  container.querySelector('#status-filter').addEventListener('click', (event) => {
-    const button = event.target.closest('[data-status]');
-    if (!button) return;
-    filters.status = button.dataset.status;
-    if (filters.status === 'today') filters.project = 'all';
-    container.querySelectorAll('[data-status]').forEach((item) => item.classList.toggle('active', item === button));
-    renderAll();
-  });
+      const row = event.target.closest('[data-task-id]');
+      if (!row) return;
+      const taskId = Number(row.dataset.taskId);
+      const task = cache.tasks.find((item) => item.id === taskId);
 
-  const searchInput = container.querySelector('#task-search');
-  searchInput.addEventListener(
-    'input',
-    debounce(() => {
-      filters.search = searchInput.value.trim();
-      renderList();
-    }, 200)
+      if (action === 'toggle') {
+        await toggleTask(taskId, task?.status !== 'done');
+      } else if (action === 'focus') {
+        setTimerTask(taskId, task?.title || null);
+        location.hash = '#/pomodoro';
+      } else if (action === 'delete') {
+        const deleted = await deleteTask(taskId);
+        if (deleted) await refreshData().catch(() => {});
+      } else if (action === 'open' || event.target.closest('.task-row')) {
+        openTaskDrawer(taskId);
+      }
+    },
+    { signal }
   );
 
-  container.querySelector('#priority-filter').addEventListener('change', (event) => {
-    filters.priority = event.target.value;
+  projectTabs.addEventListener(
+    'click',
+    (event) => {
+      const chip = event.target.closest('[data-project]');
+      if (!chip) return;
+      const project = chip.dataset.project;
+      if (project === 'today') {
+        filters.project = 'all';
+        filters.status = 'today';
+        container.querySelectorAll('[data-status]').forEach((button) => button.classList.toggle('active', button.dataset.status === 'today'));
+      } else {
+        filters.project = project;
+        if (filters.status === 'today') {
+          filters.status = 'open';
+          container.querySelectorAll('[data-status]').forEach((button) => button.classList.toggle('active', button.dataset.status === 'open'));
+        }
+      }
+      renderAll();
+    },
+    { signal }
+  );
+
+  container.querySelector('#status-filter').addEventListener(
+    'click',
+    (event) => {
+      const button = event.target.closest('[data-status]');
+      if (!button) return;
+      filters.status = button.dataset.status;
+      if (filters.status === 'today') filters.project = 'all';
+      container.querySelectorAll('[data-status]').forEach((item) => item.classList.toggle('active', item === button));
+      renderAll();
+    },
+    { signal }
+  );
+
+  const searchInput = container.querySelector('#task-search');
+  const onSearch = debounce(() => {
+    filters.search = searchInput.value.trim();
     renderList();
-  });
+  }, 200);
+  searchInput.addEventListener('input', onSearch, { signal });
+
+  container.querySelector('#priority-filter').addEventListener(
+    'change',
+    (event) => {
+      filters.priority = event.target.value;
+      renderList();
+    },
+    { signal }
+  );
 
   // 支持从首页 / URL 直接打开任务详情
   const query = new URLSearchParams(location.hash.split('?')[1] || '');
   const taskParam = Number(query.get('task'));
   if (taskParam) {
     setTimeout(() => {
-      if (container.isConnected) openTaskDrawer(taskParam);
+      if (!disposed && container.isConnected) openTaskDrawer(taskParam);
     }, 120);
   }
   if (query.get('new') === '1') {
@@ -888,5 +1112,11 @@ export async function render(container) {
     openNewTaskModal();
   }
 
-  return () => {};
+  return () => {
+    disposed = true;
+    controller.abort();
+    onSearch.cancel();
+    forceCloseActiveDrawer?.();
+    forceCloseActiveDrawer = null;
+  };
 }

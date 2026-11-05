@@ -228,7 +228,7 @@ export async function render(container) {
         </div>
         <div class="overview-grid">
           <div><strong>${tasks.open || 0}</strong><span>未完成</span></div>
-          <div><strong>${tasks.today || 0}</strong><span>今日到期</span></div>
+          <div><strong>${tasks.today || 0}</strong><span>今日任务</span></div>
           <div><strong class="${tasks.overdue ? 'text-danger' : ''}">${tasks.overdue || 0}</strong><span>已逾期</span></div>
         </div>
       </section>
