@@ -23,7 +23,7 @@
 - 子任务拆分、勾选与标题修改保存
 - 手动记录投入时间，自动汇总番茄专注时长
 - 按状态、项目、优先级筛选，支持关键词搜索
-- 任务详情抽屉内编辑，点击「保存修改」按钮生效
+- 任务详情抽屉内编辑自动保存（600ms 防抖），也可点击「保存修改」立即保存；子任务标题改完点击行内保存按钮
 
 ### 番茄钟
 - 专注 / 短休息 / 长休息三种模式
@@ -90,27 +90,27 @@ docker compose down -v
 ### 方式二：直接使用 Docker 命令
 
 ```bash
-docker build -t focusbox:1.0.5 .
+docker build -t focusbox:1.0.6 .
 docker run -d \
   --name focusbox \
   -p 3000:3000 \
   -v focusbox-data:/data \
   --restart unless-stopped \
-  focusbox:1.0.5
+  focusbox:1.0.6
 ```
 
 ### 方式三：使用已导出的镜像文件
 
-如果当前目录的 `release/` 下已有 CI 导出的镜像 tar（例如 `focusbox-1.0.5-amd64.tar`）：
+如果当前目录的 `release/` 下已有 CI 导出的镜像 tar（例如 `focusbox-1.0.6-amd64.tar`）：
 
 ```bash
-docker load -i release/focusbox-1.0.5-amd64.tar
+docker load -i release/focusbox-1.0.6-amd64.tar
 docker run -d \
   --name focusbox \
   -p 3000:3000 \
   -v focusbox-data:/data \
   --restart unless-stopped \
-  focusbox:1.0.5
+  focusbox:1.0.6
 ```
 
 如需启用登录：
@@ -123,7 +123,7 @@ docker run -d \
   --restart unless-stopped \
   -e FOCUSBOX_USERNAME=admin \
   -e FOCUSBOX_PASSWORD=你的密码 \
-  focusbox:1.0.5
+  focusbox:1.0.6
 ```
 
 ### 方式四：飞牛 fnOS（.fpk 安装包）

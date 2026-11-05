@@ -6,7 +6,7 @@
 #   ./deploy/fnos/build.sh <version> [输出目录]
 #
 # 示例：
-#   ./deploy/fnos/build.sh 1.0.5 release
+#   ./deploy/fnos/build.sh 1.0.6 release
 #
 # 依赖：
 #   - fnpack 1.2.3（https://static2.fnnas.com/fnpack/fnpack-1.2.3-linux-amd64）

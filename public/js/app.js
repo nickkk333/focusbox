@@ -87,7 +87,7 @@ function shellHtml() {
           <div class="mini-timer" id="mini-timer" hidden></div>
           ${authState.enabled ? `<button type="button" class="btn btn-ghost btn-block logout-btn" id="logout-btn">${icon('logout', 16)}退出登录</button>` : ''}
           <div class="sidebar-meta">
-            <span>v1.0.5</span>
+            <span>v1.0.6</span>
             <span class="dot-sep">·</span>
             <span>自托管</span>
           </div>

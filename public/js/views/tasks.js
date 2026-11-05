@@ -522,6 +522,7 @@ export async function render(container) {
     let forceClose = false;
     let confirmingClose = false;
     let closeDrawer = null;
+    let flushMainDraft = () => {};
     const subtaskDrafts = new Map();
 
     function isDirty() {
@@ -540,15 +541,19 @@ export async function render(container) {
 
     openDrawer({
       title: '任务详情',
-      subtitle: '修改后点击「保存修改」按钮生效',
+      subtitle: '修改会自动保存，也可点击「保存修改」立即生效',
       body: `<div id="task-detail"></div>`,
       onBeforeClose() {
-        if (forceClose || (!isDirty() && !hasSubtaskChanges())) return true;
+        if (forceClose) return true;
+        // 主表单自动保存；关闭时把防抖窗口内尚未提交的改动立即同步。
+        flushMainDraft();
+        // 子任务标题仍需点击行内保存按钮，未保存时单独提示。
+        if (!hasSubtaskChanges()) return true;
         if (confirmingClose) return false;
         confirmingClose = true;
         confirmDialog({
-          title: '放弃未保存的修改？',
-          message: '任务详情或子任务中有尚未保存的修改，关闭后会丢失这些修改。',
+          title: '放弃未保存的子任务修改？',
+          message: '有子任务标题尚未保存，关闭后会丢失这些修改。',
           confirmText: '放弃修改',
           cancelText: '继续编辑',
           danger: true,
@@ -595,7 +600,7 @@ export async function render(container) {
           hint.classList.toggle('unsaved', !saveError && !saving && dirty);
           if (saveError) hint.textContent = `保存失败：${saveError}`;
           else if (saving) hint.textContent = '正在保存…';
-          else if (dirty) hint.textContent = '有未保存的修改';
+          else if (dirty) hint.textContent = '修改将自动保存…';
           else hint.textContent = '所有修改已保存';
           button.disabled = saving || !dirty;
         }
@@ -609,47 +614,70 @@ export async function render(container) {
           bus.emit('badges-refresh');
         }
 
-        async function saveTask() {
+        const autoSave = debounce(() => { saveDraft(false); }, 600);
+
+        async function saveDraft(showToast = false) {
           collectDraft();
           if (saving || !isDirty()) return;
-          const title = draft.title.trim();
+          // 记录本次提交的表单快照，成功后以此作为「已保存」基准，避免服务端规范化
+          // （如标题 trim）导致草稿反复判定为未保存。
+          const next = { ...draft };
+          const title = next.title.trim();
           if (!title) {
-            field('title')?.focus();
-            toast('任务标题不能为空', 'error');
+            if (showToast) {
+              field('title')?.focus();
+              toast('任务标题不能为空', 'error');
+            }
             return;
           }
-          if (draft.startDate && draft.dueDate && draft.startDate > draft.dueDate) {
-            field('startDate')?.focus();
-            toast('开始日期不能晚于截止日期', 'error');
+          if (next.startDate && next.dueDate && next.startDate > next.dueDate) {
+            if (showToast) {
+              field('startDate')?.focus();
+              toast('开始日期不能晚于截止日期', 'error');
+            }
             return;
           }
           saving = true;
           saveError = '';
           updateSaveState();
+          let failed = false;
           try {
             const result = await api.patch(`/api/tasks/${taskId}`, {
               title,
-              projectId: draft.projectId || null,
-              startDate: draft.startDate || null,
-              dueDate: draft.dueDate || null,
-              estimateMinutes: Number(draft.estimateMinutes) || 0,
-              notes: draft.notes,
-              priority: Number(draft.priority) || 0,
+              projectId: next.projectId || null,
+              startDate: next.startDate || null,
+              dueDate: next.dueDate || null,
+              estimateMinutes: Number(next.estimateMinutes) || 0,
+              notes: next.notes,
+              priority: Number(next.priority) || 0,
             });
             state.task = result.task;
-            saved = draftFromTask(state.task);
-            draft = { ...saved };
-            render();
+            saved = next;
+            // 自动保存不重建抽屉，避免输入过程中丢失焦点；草稿继续以 DOM 当前值为准。
             syncList();
-            toast('任务已保存', 'success');
+            if (showToast) toast('任务已保存', 'success');
           } catch (error) {
+            failed = true;
             saveError = error.message;
             toast(error.message, 'error');
           } finally {
             saving = false;
+            collectDraft();
             updateSaveState();
+            // 保存期间用户又改了内容时继续自动保存；失败时不重试，等用户再操作。
+            if (!failed && isDirty()) autoSave();
           }
         }
+
+        function saveNow() {
+          autoSave.cancel();
+          saveDraft(true);
+        }
+
+        flushMainDraft = () => {
+          autoSave.cancel();
+          if (!saving) saveDraft(false);
+        };
 
         async function saveSubtask(subtaskId) {
           const subtask = state.subtasks.find((item) => item.id === subtaskId);
@@ -812,7 +840,7 @@ export async function render(container) {
             </div>
           `;
 
-          detail.querySelector('[data-action="save-task"]').addEventListener('click', saveTask);
+          detail.querySelector('[data-action="save-task"]').addEventListener('click', saveNow);
 
           detail.querySelector('[data-action="toggle-status"]').addEventListener('click', async () => {
             try {
@@ -829,6 +857,7 @@ export async function render(container) {
             collectDraft();
             saveError = '';
             updateSaveState();
+            if (isDirty()) autoSave();
           };
           DRAFT_FIELDS.forEach((name) => {
             const element = field(name);
