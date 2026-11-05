@@ -12,19 +12,46 @@
 - 支持局域网 HTTP 和 HTTPS
 - 返回键优先返回网页上一页
 
-## 构建
+## GitHub CI 构建
+
+推送 `v*` tag 时，`.github/workflows/release.yml` 会自动：
+
+1. 安装 JDK 17、Android SDK Platform 34 与 Build Tools 34.0.0
+2. 运行 `android/build.sh` 构建并签名 APK
+3. 将以下文件附加到 GitHub Release：
+
+```text
+focusbox-android-<版本>.apk
+focusbox-android-<版本>.apk.sha256
+```
+
+无需在本地安装 Android 构建环境。
+
+## 本地构建（可选）
 
 需要：
 
 - JDK 17
 - Android SDK Platform 34
 - Android SDK Build Tools 34.0.0
-- PowerShell 5.1+
+- Windows：PowerShell 5.1+
+- Linux / macOS：Bash
+
+Windows：
 
 ```powershell
-$env:ANDROID_SDK_ROOT = "D:\tools\android-sdk"
-$env:JAVA_HOME = "D:\tools\jdk17\jdk-17.0.21+9"
+$env:ANDROID_SDK_ROOT = "<Android SDK 路径>"
+$env:JAVA_HOME = "<JDK 17 路径>"
 powershell -ExecutionPolicy Bypass -File android\build.ps1
+```
+
+Linux / macOS：
+
+```bash
+export ANDROID_SDK_ROOT="<Android SDK 路径>"
+export JAVA_HOME="<JDK 17 路径>"
+export PATH="$JAVA_HOME/bin:$PATH"
+./android/build.sh
 ```
 
 输出：
@@ -33,7 +60,7 @@ powershell -ExecutionPolicy Bypass -File android\build.ps1
 android/dist/focusbox-android-<版本>.apk
 ```
 
-首次构建会生成自签名更新密钥 `android/keystore/focusbox.jks`（store password / key password 均为 `focusbox`）。请保留它，后续升级需要用同一密钥签名；如果删除，已安装的旧版本需要先卸载才能安装新版本。
+仓库中已包含自签名更新密钥 `android/keystore/focusbox.jks`（store password / key password 均为 `focusbox`）。它仅用于保证后续 APK 可以覆盖安装，不用于保护任何服务器数据。如果删除或更换密钥，已安装的旧版本需要先卸载才能安装新版本。
 
 ## 安装与使用
 

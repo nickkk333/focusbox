@@ -6,7 +6,6 @@ deploy/fnos/app/images/*.tar
 deploy/fnos/*.fpk
 android/build/
 android/dist/
-android/keystore/
 *.log
 .DS_Store
 .env

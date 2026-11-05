@@ -9,9 +9,9 @@ on:
   workflow_dispatch:
     inputs:
       version:
-        description: '版本号（X.Y.Z，例如 1.0.3）'
+        description: '版本号（X.Y.Z，例如 1.0.4）'
         required: true
-        default: '1.0.3'
+        default: '1.0.4'
       publish:
         description: '是否创建 GitHub Release'
         type: boolean
@@ -185,6 +185,36 @@ jobs:
           ./deploy/fnos/build.sh "$VERSION" release
           ls -lh release
 
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Install Android SDK packages
+        shell: bash
+        run: |
+          set -euo pipefail
+          yes | sdkmanager --licenses >/dev/null || true
+          sdkmanager --install "platforms;android-34" "build-tools;34.0.0"
+
+      - name: Build Android APK
+        shell: bash
+        env:
+          APP_VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          set -euo pipefail
+          chmod +x android/build.sh
+          ./android/build.sh
+          mkdir -p release
+          cp "android/dist/focusbox-android-${APP_VERSION}.apk" release/
+          sha256sum "release/focusbox-android-${APP_VERSION}.apk" \
+            > "release/focusbox-android-${APP_VERSION}.apk.sha256"
+          ls -lh release/focusbox-android-*
+
       - name: Upload build artifacts
         uses: actions/upload-artifact@v4
         with:
@@ -192,6 +222,7 @@ jobs:
           path: |
             release/focusbox-*.tar
             release/focusbox-*.fpk
+            release/focusbox-android-*.apk
             release/focusbox-*.sha256
           retention-days: 14
           if-no-files-found: error
@@ -205,5 +236,6 @@ jobs:
           files: |
             release/focusbox-*.tar
             release/focusbox-*.fpk
+            release/focusbox-android-*.apk
             release/focusbox-*.sha256
           generate_release_notes: true

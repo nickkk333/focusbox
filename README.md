@@ -90,27 +90,27 @@ docker compose down -v
 ### 方式二：直接使用 Docker 命令
 
 ```bash
-docker build -t focusbox:1.0.3 .
+docker build -t focusbox:1.0.4 .
 docker run -d \
   --name focusbox \
   -p 3000:3000 \
   -v focusbox-data:/data \
   --restart unless-stopped \
-  focusbox:1.0.3
+  focusbox:1.0.4
 ```
 
 ### 方式三：使用已导出的镜像文件
 
-如果当前目录的 `release/` 下已有 CI 导出的镜像 tar（例如 `focusbox-1.0.3-amd64.tar`）：
+如果当前目录的 `release/` 下已有 CI 导出的镜像 tar（例如 `focusbox-1.0.4-amd64.tar`）：
 
 ```bash
-docker load -i release/focusbox-1.0.3-amd64.tar
+docker load -i release/focusbox-1.0.4-amd64.tar
 docker run -d \
   --name focusbox \
   -p 3000:3000 \
   -v focusbox-data:/data \
   --restart unless-stopped \
-  focusbox:1.0.3
+  focusbox:1.0.4
 ```
 
 如需启用访问认证：
@@ -123,7 +123,7 @@ docker run -d \
   --restart unless-stopped \
   -e FOCUSBOX_USERNAME=admin \
   -e FOCUSBOX_PASSWORD=你的密码 \
-  focusbox:1.0.3
+  focusbox:1.0.4
 ```
 
 ### 方式四：飞牛 fnOS（.fpk 安装包）
@@ -146,15 +146,24 @@ GitHub Actions 会构建多架构镜像并推送到 GHCR，同时产出轻量安
 
 仓库的 `android/` 目录包含一个轻量 WebView 客户端。首次启动时填写服务器地址、用户名和密码，登录后与在手机浏览器中访问同一地址完全一致，可以查看和修改全部数据，也支持任务、备忘、统计、设置以及 JSON 备份的导入 / 导出。
 
-构建 APK：
+推送 `v*` tag 时，GitHub Actions 会使用 Android SDK 自动构建 APK，并附加到对应的 GitHub Release：
+
+```text
+focusbox-android-<版本>.apk
+focusbox-android-<版本>.apk.sha256
+```
+
+直接到 Releases 页面下载安装即可。仓库中已包含 CI 签名密钥 `android/keystore/focusbox.jks`（store password / key password 均为 `focusbox`），仅用于保证后续 APK 可以覆盖安装，不用于保护任何服务器数据。
+
+如需本地构建（可选）：
 
 ```powershell
-$env:ANDROID_SDK_ROOT = "D:\tools\android-sdk"
-$env:JAVA_HOME = "D:\tools\jdk17\jdk-17.0.21+9"
+$env:ANDROID_SDK_ROOT = "<Android SDK 路径>"
+$env:JAVA_HOME = "<JDK 17 路径>"
 powershell -ExecutionPolicy Bypass -File android\build.ps1
 ```
 
-输出为 `android/dist/focusbox-android-<版本>.apk`。首次构建会在 `android/keystore/` 生成自签名更新密钥，请保留该文件，以便后续版本覆盖安装。详细说明见 [`android/README.md`](android/README.md)。
+输出为 `android/dist/focusbox-android-<版本>.apk`。详细说明见 [`android/README.md`](android/README.md)。
 
 安装后在首屏输入例如 `http://192.168.1.20:8083`、安装向导中设置的用户名和密码即可。局域网可以直接使用 HTTP；公网访问请在服务器前配置 HTTPS 反向代理。
 
@@ -183,6 +192,8 @@ npm run dev
 - `focusbox-<版本>-arm64.tar`：arm64 Docker 镜像
 - `focusbox-fnos-<版本>.fpk`：飞牛 fnOS 轻量安装包（安装时从 GHCR 拉取镜像）
 - `focusbox-fnos-<版本>.fpk.sha256`：安装包校验和
+- `focusbox-android-<版本>.apk`：安卓客户端
+- `focusbox-android-<版本>.apk.sha256`：APK 校验和
 
 镜像地址为 `ghcr.io/nickkk333/focusbox:<版本>` 和 `ghcr.io/nickkk333/focusbox:latest`。tag 推送会自动创建 GitHub Release；手动触发时可勾选 `publish` 创建 Release。工作流还会启动 amd64 镜像做健康检查、数据目录权限与访问认证冒烟测试。
 

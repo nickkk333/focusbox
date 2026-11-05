@@ -1,7 +1,7 @@
 # 专注盒子 FocusBox - 飞牛 fnOS 应用包描述
 # 版本号由 deploy/fnos/build.sh 在打包时写入，必须为 X.Y.Z。
 appname=focusbox
-version=1.0.3
+version=1.0.4
 display_name=专注盒子
 desc=集备忘录、番茄钟与任务清单于一体的自托管效率工具，数据保存在本地 SQLite。
 source=thirdparty

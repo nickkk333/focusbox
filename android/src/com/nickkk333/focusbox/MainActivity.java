@@ -361,7 +361,7 @@ public class MainActivity extends Activity {
         settings.setMixedContentMode(WebSettings.MIXED_CONTENT_COMPATIBILITY_MODE);
         settings.setCacheMode(WebSettings.LOAD_DEFAULT);
         settings.setMediaPlaybackRequiresUserGesture(true);
-        settings.setUserAgentString(settings.getUserAgentString() + " FocusBoxAndroid/1.0.3");
+        settings.setUserAgentString(settings.getUserAgentString() + " FocusBoxAndroid/1.0.4");
 
         webView.setBackgroundColor(Color.WHITE);
         webView.setOverScrollMode(View.OVER_SCROLL_IF_CONTENT_SCROLLS);
