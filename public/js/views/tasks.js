@@ -1,4 +1,4 @@
-import { api } from '../api.js';
+import { api, withQuery } from '../api.js';
 import { bus } from '../bus.js';
 import { icon } from '../icons.js';
 import { openModal, openDrawer, confirmDialog, toast, emptyState } from '../components.js';
@@ -10,7 +10,9 @@ import {
   formatMinutes,
   formatDateTime,
   dateBadge,
+  isDailyTask,
   isTaskOnDate,
+  isTaskOpen,
   isTaskOverdue,
   priorityMeta,
   relativeTime,
@@ -25,6 +27,86 @@ const PRIORITIES = [
 ];
 
 const DRAFT_FIELDS = ['title', 'projectId', 'startDate', 'dueDate', 'estimateMinutes', 'notes'];
+const WEEKDAY_LABELS = ['一', '二', '三', '四', '五', '六', '日'];
+
+function checkinCalendarHtml(task, checkinDates) {
+  const checked = new Set(checkinDates || []);
+  const today = todayStr();
+  const start = task.startDate || (task.createdAt ? task.createdAt.slice(0, 10) : today);
+  const end = task.dueDate || today;
+  if (!start || !end || end < start) {
+    return `<p class="muted small">设置开始和结束日期后，这里会显示打卡日历。</p>`;
+  }
+
+  const [startYear, startMonth] = start.split('-').map(Number);
+  const [endYear, endMonth] = end.split('-').map(Number);
+  let year = startYear;
+  let month = startMonth;
+  let guard = 0;
+  const months = [];
+
+  while ((year < endYear || (year === endYear && month <= endMonth)) && guard < 60) {
+    const monthKey = `${year}-${String(month).padStart(2, '0')}`;
+    const first = new Date(year, month - 1, 1);
+    const daysInMonth = new Date(year, month, 0).getDate();
+    const leading = (first.getDay() + 6) % 7;
+    let cells = '';
+    for (let index = 0; index < leading; index += 1) {
+      cells += `<span class="checkin-cell empty" aria-hidden="true"></span>`;
+    }
+    for (let day = 1; day <= daysInMonth; day += 1) {
+      const date = `${monthKey}-${String(day).padStart(2, '0')}`;
+      if (date < start || date > end) {
+        // 时间段之外不显示日期，只保留网格占位。
+        cells += `<span class="checkin-cell empty" aria-hidden="true"></span>`;
+        continue;
+      }
+      const done = checked.has(date);
+      const classes = ['checkin-cell', 'in-range'];
+      if (done) classes.push('checked');
+      else if (date < today) classes.push('missed');
+      if (date === today) classes.push('today');
+      const stateText = done ? '已打卡' : date < today ? '未打卡' : '待打卡';
+      cells += `<span class="${classes.join(' ')}" title="${date} ${stateText}">${day}${
+        done ? `<span class="checkin-cell-mark">${icon('check', 9)}</span>` : ''
+      }</span>`;
+    }
+    months.push(`
+      <div class="checkin-month">
+        <div class="checkin-month-title">${year} 年 ${month} 月</div>
+        <div class="checkin-weekdays">${WEEKDAY_LABELS.map((label) => `<span>${label}</span>`).join('')}</div>
+        <div class="checkin-grid">${cells}</div>
+      </div>
+    `);
+    month += 1;
+    if (month > 12) {
+      month = 1;
+      year += 1;
+    }
+    guard += 1;
+  }
+
+  return `<div class="checkin-calendar">${months.join('')}</div>`;
+}
+
+function checkinSummaryText(task, checkinDates) {
+  const dates = Array.isArray(checkinDates) ? checkinDates : [];
+  const range = task.startDate && task.dueDate ? ` · ${task.startDate} 至 ${task.dueDate}` : '';
+  return `已打卡 ${dates.length} 天${range}`;
+}
+
+function checkinSectionHtml(task, checkinDates) {
+  const dates = Array.isArray(checkinDates) ? checkinDates : [];
+  return `
+    <section class="detail-section">
+      <div class="detail-section-head">
+        <h4>打卡日历</h4>
+        <span data-checkin-summary>${checkinSummaryText(task, dates)}</span>
+      </div>
+      <div data-checkin-calendar>${checkinCalendarHtml(task, dates)}</div>
+    </section>
+  `;
+}
 
 function draftFromTask(task) {
   return {
@@ -67,10 +149,11 @@ function filterTasks() {
   if (filters.project === 'none') tasks = tasks.filter((task) => !task.projectId);
   else if (filters.project !== 'all') tasks = tasks.filter((task) => String(task.projectId) === String(filters.project));
 
-  if (filters.status === 'open') tasks = tasks.filter((task) => task.status === 'open');
-  else if (filters.status === 'done') tasks = tasks.filter((task) => task.status === 'done');
-  else if (filters.status === 'today') tasks = tasks.filter((task) => task.status === 'open' && isTaskOnDate(task, today));
-  else if (filters.status === 'overdue') {
+  if (filters.status === 'open') tasks = tasks.filter((task) => isTaskOpen(task, today));
+  else if (filters.status === 'done') tasks = tasks.filter((task) => !isDailyTask(task) && task.status === 'done');
+  else if (filters.status === 'today') {
+    tasks = tasks.filter((task) => isTaskOnDate(task, today) && (isDailyTask(task) || task.status === 'open'));
+  } else if (filters.status === 'overdue') {
     tasks = tasks.filter((task) => task.status === 'open' && isTaskOverdue(task, today));
   }
 
@@ -86,23 +169,28 @@ function filterTasks() {
 }
 
 function taskRowHtml(task) {
+  const daily = isDailyTask(task);
+  const checkedToday = daily && Boolean(task.checkedToday);
   const due = dateBadge(task);
   const priority = priorityMeta(task.priority);
   const totalSeconds = (task.focusSeconds || 0) + (task.manualMinutes || 0) * 60;
-  const done = task.status === 'done';
+  const done = !daily && task.status === 'done';
+  const checked = done || checkedToday;
   return `
-    <article class="task-row ${done ? 'done' : ''}" data-task-id="${task.id}">
-      <button type="button" class="check ${done ? 'checked' : ''}" data-action="toggle" aria-checked="${done}" aria-label="切换完成状态">
+    <article class="task-row ${done ? 'done' : ''} ${checkedToday ? 'checked-today' : ''} ${daily ? 'is-daily' : ''}" data-task-id="${task.id}">
+      <button type="button" class="check ${checked ? 'checked' : ''}" data-action="toggle" aria-checked="${checked}" aria-label="${daily ? '切换今日打卡' : '切换完成状态'}">
         ${icon('check', 13)}
       </button>
       <button type="button" class="task-main" data-action="open">
         <span class="task-title-line">
+          ${daily ? `<span class="task-type-badge">${icon('repeat', 11)}每日</span>` : ''}
           <span class="task-title">${esc(task.title)}</span>
           ${task.priority > 0 ? `<span class="priority-flag" style="color:${priority.color}" title="优先级：${priority.label}">${icon('flag', 14)}</span>` : ''}
         </span>
         <span class="task-meta">
           ${task.projectName ? `<span class="project-tag"><span class="project-dot" style="background:${esc(task.projectColor)}"></span>${esc(task.projectName)}</span>` : ''}
           ${due ? `<span class="due-badge ${due.tone}">${icon('calendar', 12)}${due.text}</span>` : ''}
+          ${daily ? `<span class="meta-text">${icon('check', 12)}已打卡 ${task.checkinCount || 0} 天</span>` : ''}
           ${task.estimateMinutes ? `<span class="meta-text">${icon('clock', 12)}预计 ${formatMinutes(task.estimateMinutes)}</span>` : ''}
           ${totalSeconds > 0 ? `<span class="meta-text">${icon('timer', 12)}已投入 ${formatFocus(totalSeconds, { compact: true })}</span>` : ''}
           ${task.subtaskCount ? `<span class="meta-text">${icon('check', 12)}${task.subtaskDone}/${task.subtaskCount} 子任务</span>` : ''}
@@ -142,9 +230,10 @@ export async function render(container) {
   let disposed = false;
   let forceCloseActiveDrawer = null;
 
+  const initialDate = todayStr();
   const [projectData, taskData] = await Promise.all([
-    api.get('/api/projects'),
-    api.get('/api/tasks?status=all'),
+    api.get(withQuery('/api/projects', { date: initialDate })),
+    api.get(withQuery('/api/tasks', { status: 'all', date: initialDate })),
   ]);
   cache.projects = projectData.projects || [];
   cache.palette = projectData.palette || [];
@@ -198,9 +287,11 @@ export async function render(container) {
   const projectTabs = container.querySelector('#project-tabs');
 
   function renderProjectTabs() {
-    const openCount = cache.tasks.filter((task) => task.status === 'open').length;
     const today = todayStr();
-    const todayCount = cache.tasks.filter((task) => task.status === 'open' && isTaskOnDate(task, today)).length;
+    const openCount = cache.tasks.filter((task) => isTaskOpen(task, today)).length;
+    const todayCount = cache.tasks.filter(
+      (task) => isTaskOnDate(task, today) && (isDailyTask(task) || task.status === 'open')
+    ).length;
     const chips = [
       `<button type="button" class="chip ${filters.project === 'all' && filters.status !== 'today' ? 'active' : ''}" data-project="all">全部<span class="chip-count">${openCount}</span></button>`,
       `<button type="button" class="chip ${filters.status === 'today' ? 'active' : ''}" data-project="today">今天<span class="chip-count">${todayCount}</span></button>`,
@@ -216,7 +307,7 @@ export async function render(container) {
     if (cache.tasks.some((task) => !task.projectId)) {
       chips.push(
         `<button type="button" class="chip ${filters.project === 'none' ? 'active' : ''}" data-project="none">未分类<span class="chip-count">${
-          cache.tasks.filter((task) => !task.projectId && task.status === 'open').length
+          cache.tasks.filter((task) => !task.projectId && isTaskOpen(task, today)).length
         }</span></button>`
       );
     }
@@ -251,9 +342,10 @@ export async function render(container) {
 
   // 任何写操作后都从服务端重新拉取数据并完整重绘，避免页面停留在旧数据。
   async function refreshData() {
+    const date = todayStr();
     const [nextProjects, nextTasks] = await Promise.all([
-      api.get('/api/projects'),
-      api.get('/api/tasks?status=all'),
+      api.get(withQuery('/api/projects', { date })),
+      api.get(withQuery('/api/tasks', { status: 'all', date })),
     ]);
     if (disposed) return;
     cache.projects = nextProjects.projects || [];
@@ -262,9 +354,13 @@ export async function render(container) {
     renderAll();
   }
 
-  async function toggleTask(taskId, done) {
+  async function toggleTask(task) {
+    if (!task) return;
     try {
-      await api.post(`/api/tasks/${taskId}/toggle`, { status: done ? 'done' : 'open' });
+      await api.post(
+        `/api/tasks/${task.id}/toggle`,
+        isDailyTask(task) ? { date: todayStr() } : {}
+      );
       await refreshData();
       bus.emit('badges-refresh');
     } catch (error) {
@@ -305,6 +401,20 @@ export async function render(container) {
             <span>任务标题</span>
             <input class="input" name="title" maxlength="300" placeholder="例如：整理本周项目周报" autofocus required />
           </label>
+          <div class="field">
+            <span>任务类型</span>
+            <div class="task-type-switch" id="task-type-switch" role="radiogroup" aria-label="任务类型">
+              <button type="button" class="task-type-option active" data-task-type="single" role="radio" aria-checked="true">
+                <span class="task-type-option-title">${icon('check', 15)}单次任务</span>
+                <small>完成后结束，只出现一次</small>
+              </button>
+              <button type="button" class="task-type-option" data-task-type="daily" role="radio" aria-checked="false">
+                <span class="task-type-option-title">${icon('repeat', 15)}每日打卡</span>
+                <small>时间段内每天出现</small>
+              </button>
+            </div>
+            <p class="field-hint" id="task-type-hint">默认创建单次任务，完成后自动结束。</p>
+          </div>
           <div class="field-grid">
             <label class="field">
               <span>所属项目</span>
@@ -315,7 +425,7 @@ export async function render(container) {
               <input class="input" type="date" name="startDate" value="${todayStr()}" />
             </label>
             <label class="field">
-              <span>截止日期</span>
+              <span id="due-date-label">截止日期</span>
               <input class="input" type="date" name="dueDate" />
             </label>
             <label class="field">
@@ -342,6 +452,31 @@ export async function render(container) {
       onMount(root, close) {
         root.querySelector('[data-close]').addEventListener('click', close);
         const form = root.querySelector('#create-task-form');
+        const typeButtons = root.querySelectorAll('[data-task-type]');
+        const typeHint = root.querySelector('#task-type-hint');
+        const dueLabel = root.querySelector('#due-date-label');
+        let taskType = 'single';
+
+        function setTaskType(type) {
+          taskType = type;
+          typeButtons.forEach((button) => {
+            const active = button.dataset.taskType === type;
+            button.classList.toggle('active', active);
+            button.setAttribute('aria-checked', active ? 'true' : 'false');
+          });
+          const daily = type === 'daily';
+          form.elements.dueDate.required = daily;
+          dueLabel.textContent = daily ? '结束日期' : '截止日期';
+          typeHint.textContent = daily
+            ? '每日打卡任务会在开始到结束日期之间每天出现，可逐日打卡。'
+            : '默认创建单次任务，完成后自动结束。';
+        }
+
+        typeButtons.forEach((button) => {
+          button.addEventListener('click', () => setTaskType(button.dataset.taskType));
+        });
+        setTaskType('single');
+
         form.addEventListener('submit', async (event) => {
           event.preventDefault();
           const data = new FormData(form);
@@ -357,19 +492,25 @@ export async function render(container) {
             form.elements.startDate.focus();
             return;
           }
+          if (taskType === 'daily' && !dueDate) {
+            toast('每日打卡任务需要设置结束日期', 'error');
+            form.elements.dueDate.focus();
+            return;
+          }
           const submit = form.querySelector('[type="submit"]');
           submit.disabled = true;
           try {
             await api.post('/api/tasks', {
               title,
               projectId: data.get('projectId') || null,
+              taskType,
               startDate,
               dueDate,
               priority: Number(data.get('priority')) || 0,
               estimateMinutes: Number(data.get('estimateMinutes')) || 0,
               notes: String(data.get('notes') || ''),
             });
-            toast('任务已创建', 'success');
+            toast(taskType === 'daily' ? '每日打卡任务已创建' : '任务已创建', 'success');
             close();
             await refreshData();
             bus.emit('badges-refresh');
@@ -515,6 +656,7 @@ export async function render(container) {
       subtasks: data.subtasks || [],
       timeEntries: data.timeEntries || [],
       sessions: data.sessions || [],
+      checkins: data.checkins || [],
     };
 
     let draft = draftFromTask(state.task);
@@ -641,6 +783,7 @@ export async function render(container) {
           saveError = '';
           updateSaveState();
           let failed = false;
+          const previousRange = `${state.task.startDate || ''}|${state.task.dueDate || ''}`;
           try {
             const result = await api.patch(`/api/tasks/${taskId}`, {
               title,
@@ -653,6 +796,11 @@ export async function render(container) {
             });
             state.task = result.task;
             saved = next;
+            // 每日打卡任务调整时间段后，服务端会清理超出范围的打卡记录，需要重新拉取日历。
+            if (isDailyTask(state.task)) {
+              const nextRange = `${state.task.startDate || ''}|${state.task.dueDate || ''}`;
+              if (nextRange !== previousRange) refreshCheckins();
+            }
             // 自动保存不重建抽屉，避免输入过程中丢失焦点；草稿继续以 DOM 当前值为准。
             syncList();
             if (showToast) toast('任务已保存', 'success');
@@ -678,6 +826,19 @@ export async function render(container) {
           autoSave.cancel();
           if (!saving) saveDraft(false);
         };
+
+        async function refreshCheckins() {
+          try {
+            const date = todayStr();
+            const data = await api.get(withQuery(`/api/tasks/${taskId}`, { date }));
+            state.task = data.task;
+            state.checkins = data.checkins || [];
+            // 时间段变化会影响顶部打卡状态和日历范围，整体重绘抽屉。
+            render();
+          } catch (_) {
+            /* 打卡日历刷新失败时保留当前显示 */
+          }
+        }
 
         async function saveSubtask(subtaskId) {
           const subtask = state.subtasks.find((item) => item.id === subtaskId);
@@ -750,7 +911,22 @@ export async function render(container) {
 
         function render() {
           const task = state.task;
-          const done = task.status === 'done';
+          const today = todayStr();
+          const daily = isDailyTask(task);
+          const inRange = isTaskOnDate(task, today);
+          const checkedToday = daily && inRange && state.checkins.includes(today);
+          const done = !daily && task.status === 'done';
+          const statusLabel = daily
+            ? !inRange
+              ? today < (task.startDate || today)
+                ? '打卡未开始'
+                : '打卡已结束'
+              : checkedToday
+                ? '今日已打卡'
+                : '今日未打卡'
+            : done
+              ? '已完成'
+              : '进行中';
           const focusSeconds = state.sessions
             .filter((session) => session.mode === 'focus' && session.completed)
             .reduce((sum, session) => sum + session.durationSeconds, 0);
@@ -760,8 +936,9 @@ export async function render(container) {
           detail.innerHTML = `
             <div id="task-fields" class="task-fields">
               <div class="detail-status">
-                <button type="button" class="check ${done ? 'checked' : ''}" data-action="toggle-status" aria-checked="${done}" aria-label="切换完成状态">${icon('check', 13)}</button>
-                <span>${done ? '已完成' : '进行中'}</span>
+                <button type="button" class="check ${checkedToday || done ? 'checked' : ''}" data-action="toggle-status" aria-checked="${checkedToday || done}" aria-label="${daily ? '切换今日打卡' : '切换完成状态'}" ${daily && !inRange ? 'disabled' : ''}>${icon('check', 13)}</button>
+                <span>${statusLabel}</span>
+                ${daily ? `<span class="task-type-badge">${icon('repeat', 11)}每日打卡</span>` : ''}
                 <span class="detail-meta">创建于 ${formatDateTime(task.createdAt)}</span>
               </div>
               <input class="detail-title ${done ? 'done' : ''}" name="title" value="${esc(draft.title)}" maxlength="300" aria-label="任务标题" />
@@ -779,8 +956,8 @@ export async function render(container) {
                   <input class="input" type="date" name="startDate" value="${esc(draft.startDate)}" />
                 </label>
                 <label class="field">
-                  <span>截止日期</span>
-                  <input class="input" type="date" name="dueDate" value="${esc(draft.dueDate)}" />
+                  <span>${daily ? '结束日期' : '截止日期'}</span>
+                  <input class="input" type="date" name="dueDate" value="${esc(draft.dueDate)}" ${daily ? 'required' : ''} />
                 </label>
                 <div class="field">
                   <span>优先级</span>
@@ -797,6 +974,8 @@ export async function render(container) {
                 <textarea class="textarea" name="notes" rows="4" maxlength="20000" placeholder="补充说明、参考链接，或者完成任务的标准…">${esc(draft.notes)}</textarea>
               </label>
             </div>
+
+            ${daily ? checkinSectionHtml(task, state.checkins) : ''}
 
             <section class="detail-section">
               <div class="detail-section-head">
@@ -844,8 +1023,14 @@ export async function render(container) {
 
           detail.querySelector('[data-action="toggle-status"]').addEventListener('click', async () => {
             try {
-              const result = await api.post(`/api/tasks/${taskId}/toggle`);
+              const result = daily
+                ? await api.post(`/api/tasks/${taskId}/toggle`, { date: todayStr() })
+                : await api.post(`/api/tasks/${taskId}/toggle`);
               state.task = result.task;
+              if (daily) {
+                state.checkins = result.checkins || [];
+                if (result.checked) toast('今日已打卡', 'success', 1600);
+              }
               render();
               syncList();
             } catch (error) {
@@ -1063,7 +1248,7 @@ export async function render(container) {
       const task = cache.tasks.find((item) => item.id === taskId);
 
       if (action === 'toggle') {
-        await toggleTask(taskId, task?.status !== 'done');
+        await toggleTask(task);
       } else if (action === 'focus') {
         setTimerTask(taskId, task?.title || null);
         location.hash = '#/pomodoro';

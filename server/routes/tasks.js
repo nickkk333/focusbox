@@ -14,6 +14,8 @@ const {
 
 const router = express.Router();
 
+const TASK_TYPES = ['single', 'daily'];
+
 const TASK_SELECT = `
   SELECT t.*, p.name AS project_name, p.color AS project_color,
     (SELECT COALESCE(SUM(s.duration_seconds), 0) FROM sessions s
@@ -21,7 +23,8 @@ const TASK_SELECT = `
     (SELECT COALESCE(SUM(te.minutes), 0) FROM time_entries te
        WHERE te.task_id = t.id) AS manual_minutes,
     (SELECT COUNT(*) FROM subtasks st WHERE st.task_id = t.id) AS subtask_count,
-    (SELECT COUNT(*) FROM subtasks st WHERE st.task_id = t.id AND st.done = 1) AS subtask_done
+    (SELECT COUNT(*) FROM subtasks st WHERE st.task_id = t.id AND st.done = 1) AS subtask_done,
+    (SELECT COUNT(*) FROM task_checkins tc WHERE tc.task_id = t.id) AS checkin_count
   FROM tasks t
   LEFT JOIN projects p ON p.id = t.project_id
 `;
@@ -32,6 +35,50 @@ function getTask(id) {
 
 function touchTask(id) {
   db.prepare('UPDATE tasks SET updated_at = ? WHERE id = ?').run(nowIso(), id);
+}
+
+function taskType(value, fallback = 'single') {
+  const type = String(value || '').trim();
+  return TASK_TYPES.includes(type) ? type : fallback;
+}
+
+function checkinDates(taskId) {
+  return db
+    .prepare('SELECT date FROM task_checkins WHERE task_id = ? ORDER BY date ASC')
+    .all(taskId)
+    .map((row) => row.date);
+}
+
+function isDateInTaskRange(task, date) {
+  if (task.start_date && date < task.start_date) return false;
+  if (task.due_date && date > task.due_date) return false;
+  return true;
+}
+
+// 为列表批量附加「已打卡天数 / 今天是否已打卡」，避免每个任务单独查询。
+function attachCheckinState(tasks, date) {
+  const dailyIds = tasks.filter((task) => task.taskType === 'daily').map((task) => task.id);
+  if (!dailyIds.length) return tasks;
+  const placeholders = dailyIds.map(() => '?').join(', ');
+  const rows = db
+    .prepare(
+      `SELECT task_id, COUNT(*) AS count,
+              MAX(CASE WHEN date = ? THEN 1 ELSE 0 END) AS checked_today
+       FROM task_checkins
+       WHERE task_id IN (${placeholders})
+       GROUP BY task_id`
+    )
+    .all(date, ...dailyIds);
+  const byTask = new Map(rows.map((row) => [row.task_id, row]));
+  return tasks.map((task) => {
+    if (task.taskType !== 'daily') return task;
+    const row = byTask.get(task.id);
+    return {
+      ...task,
+      checkinCount: row ? row.count : 0,
+      checkedToday: Boolean(row && row.checked_today),
+    };
+  });
 }
 
 function mapSubtask(row) {
@@ -58,10 +105,20 @@ router.get('/', (req, res) => {
   const where = [];
   const params = [];
 
+  const today = /^\d{4}-\d{2}-\d{2}$/.test(String(req.query.date || ''))
+    ? req.query.date
+    : new Date().toISOString().slice(0, 10);
+
   const status = String(req.query.status || 'open');
-  if (status === 'open' || status === 'done') {
-    where.push('t.status = ?');
-    params.push(status);
+  if (status === 'open') {
+    // 单次任务完成后结束；每日打卡任务只在打卡时间段内出现。
+    where.push(
+      `((t.task_type = 'single' AND t.status = 'open')
+        OR (t.task_type = 'daily' AND ${taskOnDateClause('t.')}))`
+    );
+    params.push(today, today);
+  } else if (status === 'done') {
+    where.push("t.task_type = 'single' AND t.status = 'done'");
   } else if (status !== 'all') {
     throw httpError(400, '无效的任务状态筛选');
   }
@@ -80,16 +137,12 @@ router.get('/', (req, res) => {
     params.push(asInt(req.query.priority, { min: 0, max: 3, fallback: 0 }));
   }
 
-  const today = /^\d{4}-\d{2}-\d{2}$/.test(String(req.query.date || ''))
-    ? req.query.date
-    : new Date().toISOString().slice(0, 10);
-
   const due = String(req.query.due || '');
   if (due === 'today') {
     where.push(`(${taskOnDateClause('t.')})`);
     params.push(today, today);
   } else if (due === 'overdue') {
-    where.push("t.due_date IS NOT NULL AND t.due_date < ? AND t.status = 'open'");
+    where.push("t.task_type = 'single' AND t.due_date IS NOT NULL AND t.due_date < ? AND t.status = 'open'");
     params.push(today);
   } else if (due === 'week') {
     const end = new Date(`${today}T00:00:00Z`);
@@ -109,14 +162,15 @@ router.get('/', (req, res) => {
 
   const sql = `${TASK_SELECT}
     ${where.length ? `WHERE ${where.join(' AND ')}` : ''}
-    ORDER BY CASE t.status WHEN 'open' THEN 0 ELSE 1 END,
+    ORDER BY CASE WHEN t.task_type = 'daily' THEN 0 ELSE 1 END,
+      CASE t.status WHEN 'open' THEN 0 ELSE 1 END,
       t.priority DESC,
       CASE WHEN t.due_date IS NULL THEN 1 ELSE 0 END,
       t.due_date ASC,
       t.created_at DESC
     LIMIT 500`;
-  const rows = db.prepare(sql).all(...params);
-  res.json({ tasks: rows.map(mapTask) });
+  const rows = db.prepare(sql).all(...params).map((row) => mapTask(row));
+  res.json({ tasks: attachCheckinState(rows, today), date: today });
 });
 
 router.get('/:id', (req, res) => {
@@ -139,7 +193,17 @@ router.get('/:id', (req, res) => {
       endedAt: session.ended_at,
       completed: Boolean(session.completed),
     }));
-  res.json({ task: mapTask(row), subtasks, timeEntries, sessions });
+  const checkins = row.task_type === 'daily' ? checkinDates(id) : [];
+  const today = /^\d{4}-\d{2}-\d{2}$/.test(String(req.query.date || ''))
+    ? req.query.date
+    : new Date().toISOString().slice(0, 10);
+  res.json({
+    task: mapTask(row, { checkinCount: checkins.length, checkedToday: checkins.includes(today) }),
+    subtasks,
+    timeEntries,
+    sessions,
+    checkins,
+  });
 });
 
 router.post('/', (req, res) => {
@@ -157,18 +221,20 @@ router.post('/', (req, res) => {
   const priority = asInt(req.body?.priority, { min: 0, max: 3, fallback: 0 });
   const estimateMinutes = asInt(req.body?.estimateMinutes, { min: 0, max: 100000, fallback: 0 });
   const createdAt = nowIso();
+  const type = taskType(req.body?.taskType);
   const startDate = req.body?.startDate === undefined || req.body.startDate === ''
     ? createdAt.slice(0, 10)
     : asDateString(req.body.startDate);
   const dueDate = asDateString(req.body?.dueDate);
   if (startDate && dueDate && startDate > dueDate) throw httpError(400, '开始日期不能晚于截止日期');
+  if (type === 'daily' && !dueDate) throw httpError(400, '每日打卡任务需要设置结束日期');
 
   const info = db
     .prepare(
-      `INSERT INTO tasks (project_id, title, notes, priority, status, start_date, due_date, estimate_minutes, created_at, updated_at)
-       VALUES (?, ?, ?, ?, 'open', ?, ?, ?, ?, ?)`
+      `INSERT INTO tasks (project_id, title, notes, priority, status, task_type, start_date, due_date, estimate_minutes, created_at, updated_at)
+       VALUES (?, ?, ?, ?, 'open', ?, ?, ?, ?, ?, ?)`
     )
-    .run(projectId, title, notes, priority, startDate, dueDate, estimateMinutes, createdAt, createdAt);
+    .run(projectId, title, notes, priority, type, startDate, dueDate, estimateMinutes, createdAt, createdAt);
 
   res.status(201).json({ task: mapTask(getTask(Number(info.lastInsertRowid))) });
 });
@@ -179,6 +245,9 @@ router.patch('/:id', (req, res) => {
   if (!task) throw httpError(404, '任务不存在');
 
   const updates = {};
+  if (req.body?.taskType !== undefined && taskType(req.body.taskType) !== task.task_type) {
+    throw httpError(400, '任务类型创建后不能修改');
+  }
   if (req.body?.title !== undefined) {
     const title = asText(req.body.title, { max: 300 }).trim();
     if (!title) throw httpError(400, '任务标题不能为空');
@@ -213,12 +282,19 @@ router.patch('/:id', (req, res) => {
   const finalStart = 'start_date' in updates ? updates.start_date : task.start_date;
   const finalDue = 'due_date' in updates ? updates.due_date : task.due_date;
   if (finalStart && finalDue && finalStart > finalDue) throw httpError(400, '开始日期不能晚于截止日期');
+  if (task.task_type === 'daily' && !finalDue) throw httpError(400, '每日打卡任务需要设置结束日期');
 
   updates.updated_at = nowIso();
 
   const columns = Object.keys(updates);
   const assignments = columns.map((column) => `${column} = ?`).join(', ');
   db.prepare(`UPDATE tasks SET ${assignments} WHERE id = ?`).run(...columns.map((column) => updates[column]), id);
+
+  // 每日打卡任务调整时间段后，清掉落在时间段之外的打卡记录。
+  if (task.task_type === 'daily' && ('start_date' in updates || 'due_date' in updates)) {
+    if (finalStart) db.prepare('DELETE FROM task_checkins WHERE task_id = ? AND date < ?').run(id, finalStart);
+    if (finalDue) db.prepare('DELETE FROM task_checkins WHERE task_id = ? AND date > ?').run(id, finalDue);
+  }
 
   res.json({ task: mapTask(getTask(id)) });
 });
@@ -227,6 +303,33 @@ router.post('/:id/toggle', (req, res) => {
   const id = parseId(req.params.id);
   const task = db.prepare('SELECT * FROM tasks WHERE id = ?').get(id);
   if (!task) throw httpError(404, '任务不存在');
+
+  if (task.task_type === 'daily') {
+    const date = asDateString(req.body?.date) || new Date().toISOString().slice(0, 10);
+    if (!isDateInTaskRange(task, date)) {
+      throw httpError(400, '该日期不在打卡时间段内');
+    }
+    const existing = db
+      .prepare('SELECT id FROM task_checkins WHERE task_id = ? AND date = ?')
+      .get(id, date);
+    const checked = !existing;
+    if (existing) {
+      db.prepare('DELETE FROM task_checkins WHERE id = ?').run(existing.id);
+    } else {
+      db.prepare('INSERT INTO task_checkins (task_id, date, created_at) VALUES (?, ?, ?)')
+        .run(id, date, nowIso());
+    }
+    touchTask(id);
+    const checkins = checkinDates(id);
+    res.json({
+      task: mapTask(getTask(id), { checkinCount: checkins.length, checkedToday: checked }),
+      checked,
+      date,
+      checkins,
+    });
+    return;
+  }
+
   const status = task.status === 'done' ? 'open' : 'done';
   db.prepare('UPDATE tasks SET status = ?, completed_at = ?, updated_at = ? WHERE id = ?').run(
     status,

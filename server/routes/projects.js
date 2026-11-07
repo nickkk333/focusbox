@@ -2,26 +2,32 @@
 
 const express = require('express');
 const { db, nowIso } = require('../db');
-const { httpError, asText, parseId, mapProject } = require('../utils');
+const { httpError, asText, parseId, mapProject, taskOnDateClause } = require('../utils');
 
 const router = express.Router();
 const PALETTE = ['#ef5b4c', '#f59e0b', '#2f9e79', '#4c7bf4', '#8b5cf6', '#ec4899', '#14b8a6', '#64748b'];
 
-function listProjects() {
+function listProjects(date = new Date().toISOString().slice(0, 10)) {
   const rows = db
     .prepare(
       `SELECT p.*,
-        (SELECT COUNT(*) FROM tasks t WHERE t.project_id = p.id AND t.status = 'open') AS open_tasks,
+        (SELECT COUNT(*) FROM tasks t
+          WHERE t.project_id = p.id
+            AND ((t.task_type = 'single' AND t.status = 'open')
+              OR (t.task_type = 'daily' AND ${taskOnDateClause('t.')}))) AS open_tasks,
         (SELECT COUNT(*) FROM tasks t WHERE t.project_id = p.id) AS total_tasks
        FROM projects p
        ORDER BY p.created_at ASC, p.id ASC`
     )
-    .all();
+    .all(date, date);
   return rows.map(mapProject);
 }
 
 router.get('/', (req, res) => {
-  res.json({ projects: listProjects(), palette: PALETTE });
+  const date = /^\d{4}-\d{2}-\d{2}$/.test(String(req.query.date || ''))
+    ? req.query.date
+    : new Date().toISOString().slice(0, 10);
+  res.json({ projects: listProjects(date), palette: PALETTE });
 });
 
 router.post('/', (req, res) => {
@@ -45,14 +51,20 @@ router.patch('/:id', (req, res) => {
   const color = /^#[0-9a-fA-F]{6}$/.test(String(req.body?.color || '')) ? req.body.color : project.color;
 
   db.prepare('UPDATE projects SET name = ?, color = ? WHERE id = ?').run(name, color, id);
+  const date = /^\d{4}-\d{2}-\d{2}$/.test(String(req.query.date || ''))
+    ? req.query.date
+    : new Date().toISOString().slice(0, 10);
   const row = db
     .prepare(
       `SELECT p.*,
-        (SELECT COUNT(*) FROM tasks t WHERE t.project_id = p.id AND t.status = 'open') AS open_tasks,
+        (SELECT COUNT(*) FROM tasks t
+          WHERE t.project_id = p.id
+            AND ((t.task_type = 'single' AND t.status = 'open')
+              OR (t.task_type = 'daily' AND ${taskOnDateClause('t.')}))) AS open_tasks,
         (SELECT COUNT(*) FROM tasks t WHERE t.project_id = p.id) AS total_tasks
        FROM projects p WHERE p.id = ?`
     )
-    .get(id);
+    .get(date, date, id);
   res.json({ project: mapProject(row) });
 });
 

@@ -14,6 +14,7 @@ import {
   formatMinutes,
   formatClock,
   dateBadge,
+  isDailyTask,
   isTaskOnDate,
   priorityMeta,
   relativeTime,
@@ -33,18 +34,26 @@ function statCard(iconName, value, label, hint, tone = '') {
 }
 
 function miniTaskHtml(task) {
+  const daily = isDailyTask(task);
+  const checkedToday = daily && Boolean(task.checkedToday);
+  const done = !daily && task.status === 'done';
+  const checked = checkedToday || done;
   const due = dateBadge(task);
   const priority = priorityMeta(task.priority);
   return `
-    <div class="mini-task ${task.status === 'done' ? 'done' : ''}" data-task-id="${task.id}">
-      <button type="button" class="check ${task.status === 'done' ? 'checked' : ''}" data-action="toggle" aria-label="切换完成状态" aria-checked="${task.status === 'done'}">
+    <div class="mini-task ${done ? 'done' : ''} ${checkedToday ? 'checked-today' : ''}" data-task-id="${task.id}">
+      <button type="button" class="check ${checked ? 'checked' : ''}" data-action="toggle" aria-label="${daily ? '切换今日打卡' : '切换完成状态'}" aria-checked="${checked}">
         ${icon('check', 13)}
       </button>
       <button type="button" class="mini-task-main" data-action="open-task">
-        <span class="mini-task-title">${esc(task.title)}</span>
+        <span class="mini-task-title">
+          ${daily ? `<span class="task-type-badge">${icon('repeat', 10)}每日</span>` : ''}
+          <span class="mini-task-title-text">${esc(task.title)}</span>
+        </span>
         <span class="mini-task-meta">
           ${task.projectName ? `<span class="project-dot" style="background:${esc(task.projectColor)}"></span><span>${esc(task.projectName)}</span>` : ''}
           ${due ? `<span class="due-badge ${due.tone}">${due.text}</span>` : ''}
+          ${daily ? `<span class="meta-text">已打卡 ${task.checkinCount || 0} 天</span>` : ''}
           ${task.priority > 0 ? `<span class="priority-pill" style="color:${priority.color}">${icon('flag', 12)}${priority.label}</span>` : ''}
           ${task.subtaskCount ? `<span class="meta-text">${task.subtaskDone}/${task.subtaskCount} 子任务</span>` : ''}
         </span>
@@ -113,6 +122,9 @@ export async function render(container) {
   const tasks = (taskData.tasks || [])
     .filter((task) => isTaskOnDate(task, date))
     .sort((a, b) => {
+      const dailyA = isDailyTask(a) ? 0 : 1;
+      const dailyB = isDailyTask(b) ? 0 : 1;
+      if (dailyA !== dailyB) return dailyA - dailyB;
       const dueA = a.dueDate || '9999-12-31';
       const dueB = b.dueDate || '9999-12-31';
       if (dueA !== dueB) return dueA.localeCompare(dueB);
@@ -282,7 +294,11 @@ export async function render(container) {
     const action = event.target.closest('[data-action]')?.dataset.action;
     if (action === 'toggle') {
       try {
-        await api.post(`/api/tasks/${taskId}/toggle`);
+        const task = tasks.find((item) => item.id === taskId);
+        await api.post(
+          `/api/tasks/${taskId}/toggle`,
+          task && isDailyTask(task) ? { date } : {}
+        );
         bus.emit('badges-refresh');
         refresh();
       } catch (error) {

@@ -119,7 +119,7 @@ export async function render(container) {
   startOfDay.setHours(0, 0, 0, 0);
 
   const [taskData, stats, sessionData] = await Promise.all([
-    api.get('/api/tasks?status=open'),
+    api.get(withQuery('/api/tasks', { status: 'open', date })),
     api.get(withQuery('/api/stats', { days: 1, date, tzOffset: tzOffset() })),
     api.get(withQuery('/api/sessions', { from: startOfDay.toISOString(), limit: 100 })),
   ]);

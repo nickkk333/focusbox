@@ -9,9 +9,9 @@ on:
   workflow_dispatch:
     inputs:
       version:
-        description: '版本号（X.Y.Z，例如 1.0.6）'
+        description: '版本号（X.Y.Z，例如 1.0.7）'
         required: true
-        default: '1.0.6'
+        default: '1.0.7'
       publish:
         description: '是否创建 GitHub Release'
         type: boolean

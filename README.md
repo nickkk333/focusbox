@@ -18,6 +18,8 @@
 - 最近备忘预览与置顶标记
 
 ### 任务清单
+- 支持「单次任务」与「每日打卡任务」：单次任务完成后结束，每日打卡任务在开始～结束日期之间每天出现
+- 每日打卡任务可在详情日历中查看每天的打卡情况，并随时补看已打卡 / 未打卡日期
 - 项目分类（内置「工作 / 生活 / 学习」，可自行增删改）
 - 优先级、开始日期（默认创建当天）、截止日期、预计时长、备注
 - 子任务拆分、勾选与标题修改保存
@@ -50,7 +52,7 @@
 ### 设置与数据
 - 主题：浅色 / 深色 / 跟随系统
 - 番茄钟参数与通知开关
-- JSON 全量导出 / 导入
+- JSON 全量导出 / 导入（备份格式 v2，包含任务类型与每日打卡记录；旧版备份可直接导入）
 - 一键恢复初始示例数据
 - 数据持久化到 Docker 卷
 - 可选登录 / 退出登录：设置 `FOCUSBOX_USERNAME` / `FOCUSBOX_PASSWORD` 后启用；浏览器登录页只需用户名和密码，安卓客户端登录页额外填写服务器 IP，退出登录后可更换服务器或账号；飞牛安装包会在安装向导中自动配置
@@ -90,27 +92,27 @@ docker compose down -v
 ### 方式二：直接使用 Docker 命令
 
 ```bash
-docker build -t focusbox:1.0.6 .
+docker build -t focusbox:1.0.7 .
 docker run -d \
   --name focusbox \
   -p 3000:3000 \
   -v focusbox-data:/data \
   --restart unless-stopped \
-  focusbox:1.0.6
+  focusbox:1.0.7
 ```
 
 ### 方式三：使用已导出的镜像文件
 
-如果当前目录的 `release/` 下已有 CI 导出的镜像 tar（例如 `focusbox-1.0.6-amd64.tar`）：
+如果当前目录的 `release/` 下已有 CI 导出的镜像 tar（例如 `focusbox-1.0.7-amd64.tar`）：
 
 ```bash
-docker load -i release/focusbox-1.0.6-amd64.tar
+docker load -i release/focusbox-1.0.7-amd64.tar
 docker run -d \
   --name focusbox \
   -p 3000:3000 \
   -v focusbox-data:/data \
   --restart unless-stopped \
-  focusbox:1.0.6
+  focusbox:1.0.7
 ```
 
 如需启用登录：
@@ -123,7 +125,7 @@ docker run -d \
   --restart unless-stopped \
   -e FOCUSBOX_USERNAME=admin \
   -e FOCUSBOX_PASSWORD=你的密码 \
-  focusbox:1.0.6
+  focusbox:1.0.7
 ```
 
 ### 方式四：飞牛 fnOS（.fpk 安装包）

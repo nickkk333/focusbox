@@ -57,7 +57,7 @@ function extractTags(content) {
   return tags;
 }
 
-function mapTask(row) {
+function mapTask(row, extra = {}) {
   if (!row) return null;
   return {
     id: row.id,
@@ -68,6 +68,7 @@ function mapTask(row) {
     notes: row.notes,
     priority: row.priority,
     status: row.status,
+    taskType: row.task_type === 'daily' ? 'daily' : 'single',
     startDate: row.start_date || null,
     dueDate: row.due_date,
     estimateMinutes: row.estimate_minutes,
@@ -78,6 +79,8 @@ function mapTask(row) {
     manualMinutes: row.manual_minutes || 0,
     subtaskCount: row.subtask_count || 0,
     subtaskDone: row.subtask_done || 0,
+    checkinCount: extra.checkinCount ?? row.checkin_count ?? 0,
+    checkedToday: Boolean(extra.checkedToday),
   };
 }
 

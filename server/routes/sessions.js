@@ -186,10 +186,13 @@ router.get('/stats', (req, res) => {
   const completedTasks = db
     .prepare(
       `SELECT COUNT(*) AS count FROM tasks
-       WHERE status = 'done' AND completed_at IS NOT NULL
+       WHERE task_type = 'single' AND status = 'done' AND completed_at IS NOT NULL
          AND date(completed_at, ?) >= ? AND date(completed_at, ?) <= ?`
     )
     .get(modifier, from, modifier, today).count;
+  const completedCheckins = db
+    .prepare('SELECT COUNT(*) AS count FROM task_checkins WHERE date >= ? AND date <= ?')
+    .get(from, today).count;
 
   const createdMemos = db
     .prepare(
@@ -216,14 +219,29 @@ router.get('/stats', (req, res) => {
     )
     .get(fromIso, toIso).seconds;
 
-  const openTasks = db.prepare("SELECT COUNT(*) AS count FROM tasks WHERE status = 'open'").get().count;
-  const doneTasks = db.prepare("SELECT COUNT(*) AS count FROM tasks WHERE status = 'done'").get().count;
+  const openTasks = db
+    .prepare(
+      `SELECT COUNT(*) AS count FROM tasks
+       WHERE (task_type = 'single' AND status = 'open')
+          OR (task_type = 'daily' AND ${taskOnDateClause()})`
+    )
+    .get(today, today).count;
+  const doneTasks = db
+    .prepare("SELECT COUNT(*) AS count FROM tasks WHERE task_type = 'single' AND status = 'done'")
+    .get().count;
   const overdueTasks = db
-    .prepare("SELECT COUNT(*) AS count FROM tasks WHERE status = 'open' AND due_date IS NOT NULL AND due_date < ?")
+    .prepare(
+      "SELECT COUNT(*) AS count FROM tasks WHERE task_type = 'single' AND status = 'open' AND due_date IS NOT NULL AND due_date < ?"
+    )
     .get(today).count;
   const todayTasks = db
-    .prepare(`SELECT COUNT(*) AS count FROM tasks WHERE status = 'open' AND ${taskOnDateClause()}`)
-    .get(today, today).count;
+    .prepare(
+      `SELECT COUNT(*) AS count FROM tasks t
+       WHERE (t.task_type = 'single' AND t.status = 'open' AND ${taskOnDateClause('t.')})
+          OR (t.task_type = 'daily' AND ${taskOnDateClause('t.')}
+              AND NOT EXISTS (SELECT 1 FROM task_checkins c WHERE c.task_id = t.id AND c.date = ?))`
+    )
+    .get(today, today, today, today, today).count;
 
   const memoTotal = db.prepare('SELECT COUNT(*) AS count FROM memos WHERE archived = 0').get().count;
   const pinnedMemos = db.prepare('SELECT COUNT(*) AS count FROM memos WHERE archived = 0 AND pinned = 1').get().count;
@@ -266,7 +284,7 @@ router.get('/stats', (req, res) => {
       activeDays,
       averageSeconds: Math.round(totalFocusSeconds / days),
       bestDay,
-      completedTasks,
+      completedTasks: completedTasks + completedCheckins,
       createdMemos,
       streak,
       todayFocusSeconds: byDay.get(today)?.focusSeconds || 0,
@@ -290,10 +308,21 @@ router.get('/badges', (req, res) => {
   const todayStart = localToUtcIso(today, offsetMinutes);
   const tomorrowStart = localToUtcIso(addDays(today, 1), offsetMinutes);
 
-  const openTasks = db.prepare("SELECT COUNT(*) AS count FROM tasks WHERE status = 'open'").get().count;
-  const todayTasks = db
-    .prepare(`SELECT COUNT(*) AS count FROM tasks WHERE status = 'open' AND ${taskOnDateClause()}`)
+  const openTasks = db
+    .prepare(
+      `SELECT COUNT(*) AS count FROM tasks
+       WHERE (task_type = 'single' AND status = 'open')
+          OR (task_type = 'daily' AND ${taskOnDateClause()})`
+    )
     .get(today, today).count;
+  const todayTasks = db
+    .prepare(
+      `SELECT COUNT(*) AS count FROM tasks t
+       WHERE (t.task_type = 'single' AND t.status = 'open' AND ${taskOnDateClause('t.')})
+          OR (t.task_type = 'daily' AND ${taskOnDateClause('t.')}
+              AND NOT EXISTS (SELECT 1 FROM task_checkins c WHERE c.task_id = t.id AND c.date = ?))`
+    )
+    .get(today, today, today, today, today).count;
   const memos = db.prepare('SELECT COUNT(*) AS count FROM memos WHERE archived = 0').get().count;
   const focusTodaySeconds = db
     .prepare(

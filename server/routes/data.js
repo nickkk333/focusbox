@@ -21,12 +21,19 @@ function exportAll() {
     notes: row.notes,
     priority: row.priority,
     status: row.status,
+    taskType: row.task_type === 'daily' ? 'daily' : 'single',
     startDate: row.start_date || null,
     dueDate: row.due_date,
     estimateMinutes: row.estimate_minutes,
     completedAt: row.completed_at,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
+  }));
+  const checkins = db.prepare('SELECT * FROM task_checkins ORDER BY id').all().map((row) => ({
+    id: row.id,
+    taskId: row.task_id,
+    date: row.date,
+    createdAt: row.created_at,
   }));
   const subtasks = db.prepare('SELECT * FROM subtasks ORDER BY id').all().map((row) => ({
     id: row.id,
@@ -71,10 +78,11 @@ function exportAll() {
 
   return {
     app: 'focusbox',
-    version: 1,
+    version: 2,
     exportedAt: nowIso(),
     projects,
     tasks,
+    checkins,
     subtasks,
     timeEntries,
     memos,
@@ -111,6 +119,7 @@ router.post('/import', (req, res) => {
 
   const projectIds = new Set();
   const taskIds = new Set();
+  const dailyRanges = new Map();
   const now = nowIso();
   let importedSettings = null;
 
@@ -118,6 +127,7 @@ router.post('/import', (req, res) => {
     db.exec(`
       DELETE FROM sessions;
       DELETE FROM time_entries;
+      DELETE FROM task_checkins;
       DELETE FROM subtasks;
       DELETE FROM tasks;
       DELETE FROM memos;
@@ -140,8 +150,8 @@ router.post('/import', (req, res) => {
     }
 
     const insertTask = db.prepare(
-      `INSERT INTO tasks (id, project_id, title, notes, priority, status, start_date, due_date, estimate_minutes, completed_at, created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+      `INSERT INTO tasks (id, project_id, title, notes, priority, status, task_type, start_date, due_date, estimate_minutes, completed_at, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
     );
     for (const item of arrayOf(payload, 'tasks')) {
       const title = asText(item?.title, { max: 300 }).trim();
@@ -151,12 +161,14 @@ router.post('/import', (req, res) => {
       taskIds.add(id);
       const projectId = asInt(item?.projectId, { min: 1, max: Number.MAX_SAFE_INTEGER, fallback: 0 });
       const status = item?.status === 'done' ? 'done' : 'open';
+      const type = item?.taskType === 'daily' ? 'daily' : 'single';
       const createdAt = isoOrNull(item?.createdAt) || now;
       const dueDate = /^\d{4}-\d{2}-\d{2}$/.test(String(item?.dueDate || '')) ? item.dueDate : null;
       // 旧备份没有开始日期时按创建当天回填。
       const startDate = /^\d{4}-\d{2}-\d{2}$/.test(String(item?.startDate || ''))
         ? item.startDate
         : createdAt.slice(0, 10);
+      const finalStartDate = dueDate && startDate > dueDate ? dueDate : startDate;
       insertTask.run(
         id,
         projectIds.has(projectId) ? projectId : null,
@@ -164,12 +176,34 @@ router.post('/import', (req, res) => {
         asText(item?.notes, { max: 20000 }),
         asInt(item?.priority, { min: 0, max: 3, fallback: 0 }),
         status,
-        dueDate && startDate > dueDate ? dueDate : startDate,
+        type,
+        finalStartDate,
         dueDate,
         asInt(item?.estimateMinutes, { min: 0, max: 100000, fallback: 0 }),
-        status === 'done' ? isoOrNull(item?.completedAt) || now : null,
+        status === 'done' && type === 'single' ? isoOrNull(item?.completedAt) || now : null,
         createdAt,
         isoOrNull(item?.updatedAt) || now
+      );
+      if (type === 'daily') {
+        dailyRanges.set(id, { startDate: finalStartDate, dueDate });
+      }
+    }
+
+    const insertCheckin = db.prepare(
+      'INSERT OR IGNORE INTO task_checkins (id, task_id, date, created_at) VALUES (?, ?, ?, ?)'
+    );
+    for (const item of arrayOf(payload, 'checkins')) {
+      const taskId = asInt(item?.taskId, { min: 1, max: Number.MAX_SAFE_INTEGER, fallback: 0 });
+      const range = dailyRanges.get(taskId);
+      const date = /^\d{4}-\d{2}-\d{2}$/.test(String(item?.date || '')) ? item.date : null;
+      if (!range || !date) continue;
+      if (range.startDate && date < range.startDate) continue;
+      if (range.dueDate && date > range.dueDate) continue;
+      insertCheckin.run(
+        asInt(item?.id, { min: 1, max: Number.MAX_SAFE_INTEGER, fallback: 0 }) || null,
+        taskId,
+        date,
+        isoOrNull(item?.createdAt) || now
       );
     }
 

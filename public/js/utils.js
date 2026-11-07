@@ -143,7 +143,18 @@ export function isTaskOnDate(task, date = todayStr()) {
   return started && notEnded;
 }
 
+export function isDailyTask(task) {
+  return task?.taskType === 'daily';
+}
+
+// 单次任务完成后结束；每日打卡任务在时间段内每天都处于进行中。
+export function isTaskOpen(task, date = todayStr()) {
+  if (isDailyTask(task)) return isTaskOnDate(task, date);
+  return task?.status === 'open';
+}
+
 export function isTaskOverdue(task, date = todayStr()) {
+  if (isDailyTask(task)) return false;
   return Boolean(task.dueDate) && task.dueDate < date;
 }
 
@@ -152,6 +163,11 @@ export function isTaskUpcoming(task, date = todayStr()) {
 }
 
 export function dateBadge(task, date = todayStr()) {
+  if (isDailyTask(task)) {
+    if (task.checkedToday) return { text: '今日已打卡', tone: 'today' };
+    if (task.dueDate) return { text: `打卡至 ${formatDateShort(task.dueDate)}`, tone: 'normal' };
+    return { text: '每日打卡', tone: 'normal' };
+  }
   if (isTaskUpcoming(task, date)) {
     return { text: `${formatDateShort(task.startDate)} 开始`, tone: 'normal' };
   }

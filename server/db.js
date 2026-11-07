@@ -39,12 +39,21 @@ db.exec(`
     notes TEXT NOT NULL DEFAULT '',
     priority INTEGER NOT NULL DEFAULT 0,
     status TEXT NOT NULL DEFAULT 'open',
+    task_type TEXT NOT NULL DEFAULT 'single',
     start_date TEXT,
     due_date TEXT,
     estimate_minutes INTEGER NOT NULL DEFAULT 0,
     completed_at TEXT,
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL
+  );
+
+  CREATE TABLE IF NOT EXISTS task_checkins (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    task_id INTEGER NOT NULL REFERENCES tasks(id) ON DELETE CASCADE,
+    date TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    UNIQUE(task_id, date)
   );
 
   CREATE TABLE IF NOT EXISTS subtasks (
@@ -99,19 +108,25 @@ db.exec(`
   CREATE INDEX IF NOT EXISTS idx_auth_sessions_expires ON auth_sessions(expires_at);
   CREATE INDEX IF NOT EXISTS idx_tasks_status ON tasks(status);
   CREATE INDEX IF NOT EXISTS idx_tasks_due ON tasks(due_date);
+  CREATE INDEX IF NOT EXISTS idx_task_checkins_task ON task_checkins(task_id, date);
   CREATE INDEX IF NOT EXISTS idx_sessions_ended ON sessions(ended_at);
   CREATE INDEX IF NOT EXISTS idx_sessions_task ON sessions(task_id);
   CREATE INDEX IF NOT EXISTS idx_subtasks_task ON subtasks(task_id);
   CREATE INDEX IF NOT EXISTS idx_memos_created ON memos(created_at);
 `);
 
-// 旧版本数据库没有 start_date 列，启动时补列并把已有任务的开始日期回填为创建当天。
+// 旧版本数据库没有 start_date / task_type 列，启动时补列。
+// 已有任务全部视为单次任务，开始日期回填为创建当天。
 const taskColumns = db.prepare('PRAGMA table_info(tasks)').all();
 if (!taskColumns.some((column) => column.name === 'start_date')) {
   db.exec('ALTER TABLE tasks ADD COLUMN start_date TEXT');
   db.exec("UPDATE tasks SET start_date = substr(created_at, 1, 10) WHERE start_date IS NULL");
 }
+if (!taskColumns.some((column) => column.name === 'task_type')) {
+  db.exec("ALTER TABLE tasks ADD COLUMN task_type TEXT NOT NULL DEFAULT 'single'");
+}
 db.exec('CREATE INDEX IF NOT EXISTS idx_tasks_start ON tasks(start_date)');
+db.exec('CREATE INDEX IF NOT EXISTS idx_tasks_type ON tasks(task_type)');
 
 const SETTINGS_DEFAULTS = Object.freeze({
   focusMinutes: 25,
