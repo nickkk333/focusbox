@@ -40,6 +40,10 @@ KEY_ALIAS="${ANDROID_KEY_ALIAS:-focusbox}"
 STORE_PASSWORD="${ANDROID_KEYSTORE_PASSWORD:-focusbox}"
 KEY_PASSWORD="${ANDROID_KEY_PASSWORD:-focusbox}"
 
+# 前端随 APK 分发：每次构建都从 public/ 同步，避免 assets/app 副本过期。
+rm -rf assets/app
+cp -a ../public assets/app
+
 rm -rf build dist
 mkdir -p build/classes build/dex dist
 
@@ -55,10 +59,16 @@ fi
 echo "Compiling resources..."
 "$AAPT2" compile --dir res -o build/res.zip
 
+if [ ! -d assets/app ] || [ ! -f assets/bridge/native-bridge.js ] || [ ! -f assets/bridge/local-api.js ]; then
+  echo "内置前端资源不完整：需要 assets/app/、assets/bridge/native-bridge.js、assets/bridge/local-api.js" >&2
+  exit 1
+fi
+
 echo "Linking resources and manifest..."
 "$AAPT2" link -o build/base.apk \
   -I "$ANDROID_JAR" \
   --manifest AndroidManifest.xml \
+  -A assets \
   build/res.zip \
   --auto-add-overlay
 

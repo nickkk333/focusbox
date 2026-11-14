@@ -1,0 +1,36 @@
+# 专注盒子 FocusBox · 飞牛数据服务镜像（API-only）
+#
+# 这个镜像不携带 public/ 前端资源：前端随安卓 APK 分发，
+# 服务端只提供安卓客户端需要的 /api/* 数据与一个极简状态页。
+# 构建上下文由 deploy/fnos/build.sh 在打包 fpk 时组装。
+
+FROM node:24-alpine
+
+LABEL org.opencontainers.image.title="FocusBox API" \
+      org.opencontainers.image.description="FocusBox 安卓客户端的数据服务端（仅 API）" \
+      org.opencontainers.image.version="1.1.0" \
+      org.opencontainers.image.licenses="MIT"
+
+ENV NODE_ENV=production \
+    PORT=3000 \
+    HOST=0.0.0.0 \
+    DATA_DIR=/data \
+    FOCUSBOX_API_ONLY=1 \
+    TZ=Asia/Shanghai
+
+WORKDIR /app
+
+COPY package.json package-lock.json ./
+RUN npm ci --omit=dev && npm cache clean --force
+
+COPY server ./server
+
+RUN mkdir -p /data
+
+EXPOSE 3000
+VOLUME ["/data"]
+
+HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
+  CMD node -e "fetch('http://127.0.0.1:' + (process.env.PORT || 3000) + '/api/health').then(function (r) { return r.ok ? r.json() : Promise.reject(new Error('HTTP ' + r.status)); }).then(function (d) { process.exit(d.status === 'ok' ? 0 : 1); }).catch(function () { process.exit(1); })"
+
+CMD ["node", "server/index.js"]

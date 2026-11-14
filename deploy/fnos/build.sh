@@ -54,12 +54,27 @@ find "$STAGE" -name '.DS_Store' -delete 2>/dev/null || true
 # 旧版本可能残留内置镜像，绝不能打进轻量包。
 rm -rf "$STAGE/app/images"
 
+# 组装随 fpk 分发的「API-only 镜像构建上下文」。
+# 只带服务端源码与依赖清单，public/ 前端不进包（界面内置在安卓 APK 里）。
+REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
+CONTEXT="$STAGE/app/context"
+mkdir -p "$CONTEXT"
+cp "$REPO_ROOT/package.json" "$REPO_ROOT/package-lock.json" "$CONTEXT/"
+cp -a "$REPO_ROOT/server" "$CONTEXT/server"
+cp "$SCRIPT_DIR/Dockerfile.api" "$CONTEXT/Dockerfile"
+sed -i -E "s/org.opencontainers.image.version=\"[^\"]*\"/org.opencontainers.image.version=\"${VERSION}\"/" \
+  "$CONTEXT/Dockerfile"
+find "$CONTEXT" -type f \( -name '*.db' -o -name '*.log' -o -name '.DS_Store' \) -delete 2>/dev/null || true
+
 # 写入版本号，并锁定 cmd/main 使用的镜像 tag。
 sed -i -E "s/^version=.*/version=${VERSION}/" "$STAGE/manifest"
 sed -i -E "s|^DEFAULT_IMAGE_TAG=.*|DEFAULT_IMAGE_TAG=\"${VERSION}\"|" "$STAGE/cmd/main"
 
 # Windows 工作区可能带 CRLF；fnOS 上的 #!/bin/bash\r 会报 bad interpreter。
-for f in "$STAGE"/cmd/* "$STAGE/manifest" "$STAGE"/config/* "$STAGE"/wizard/* "$STAGE"/app/ui/config; do
+for f in "$STAGE"/cmd/* "$STAGE/manifest" "$STAGE"/config/* "$STAGE"/wizard/* \
+         "$STAGE"/app/ui/config "$CONTEXT"/Dockerfile "$CONTEXT"/package.json \
+         "$CONTEXT"/package-lock.json \
+         $(find "$CONTEXT/server" -type f -name '*.js' -print); do
   [ -f "$f" ] || continue
   if grep -q $'\r' "$f" 2>/dev/null; then
     tr -d '\r' < "$f" > "$f.tmp"
@@ -80,6 +95,37 @@ PRODUCED="$(find "$STAGE" -maxdepth 1 -type f -name '*.fpk' -print -quit)"
 
 OUT_FILE="${OUT_DIR}/focusbox-fnos-${VERSION}.fpk"
 cp "$PRODUCED" "$OUT_FILE"
+
+# Windows 版 fnpack 不保留 Unix 执行位，会把 cmd/* 写成 0666。
+# fnOS 需要这些生命周期脚本可执行，这里统一修正为 0755 后重算哈希。
+PYTHON_BIN="${PYTHON_BIN:-}"
+if [ -z "$PYTHON_BIN" ]; then
+  if command -v python3 >/dev/null 2>&1; then
+    PYTHON_BIN=python3
+  elif command -v python >/dev/null 2>&1; then
+    PYTHON_BIN=python
+  fi
+fi
+if [ -n "$PYTHON_BIN" ]; then
+  "$PYTHON_BIN" - "$OUT_FILE" <<'PY'
+import io
+import sys
+import tarfile
+
+path = sys.argv[1]
+with tarfile.open(path, "r:gz") as src:
+    buffer = io.BytesIO()
+    with tarfile.open(fileobj=buffer, mode="w:gz") as dst:
+        for member in src.getmembers():
+            data = src.extractfile(member).read() if member.isfile() else None
+            if member.name.startswith("cmd/") and member.isfile():
+                member.mode = 0o755
+            dst.addfile(member, io.BytesIO(data) if data is not None else None)
+with open(path, "wb") as handle:
+    handle.write(buffer.getvalue())
+print("生命周期脚本权限已修正为 0755")
+PY
+fi
 
 (
   cd "$OUT_DIR"

@@ -3,20 +3,26 @@
 # 专注盒子 FocusBox - 飞牛 fnOS 生命周期脚本
 #
 # 本应用不使用 fnOS 的 docker-project 资源，而是由本脚本管理容器。
-# fpk 只是轻量外壳：安装时从 GHCR 拉取多架构镜像，启动时直接使用本地镜像。
+# fpk 自带服务端源码与 Dockerfile，安装后优先在 NAS 本地构建 API-only 镜像；
+# 也支持预置离线镜像 tar，找不到时才回退到 GHCR 拉取。
+# 前端界面不随 fpk 分发（内置在安卓 APK 中），服务端只提供 /api/*。
 # 脚本以 root 运行（需要访问 Docker）。
 #
 # 退出码：0 = 成功/运行中，1 = 失败，3 = 未运行（仅 status）。
 
 set +e
 
+CMD_DIR="$(cd "$(dirname "$0")" && pwd)"
 CONTAINER="${FOCUSBOX_CONTAINER:-focusbox}"
-APP_VERSION="${TRIM_APPVER:-1.0.7}"
+APP_VERSION="${TRIM_APPVER:-1.1.0}"
 # build.sh 会把 DEFAULT_IMAGE_TAG 改成实际版本；FOCUSBOX_IMAGE_TAG 可覆盖。
-DEFAULT_IMAGE_TAG="1.0.7"
-IMAGE_REPO="${FOCUSBOX_IMAGE_REPO:-ghcr.io/nickkk333/focusbox}"
+DEFAULT_IMAGE_TAG="1.1.0"
+IMAGE_REPO="${FOCUSBOX_IMAGE_REPO:-focusbox-api}"
 IMAGE_TAG="${FOCUSBOX_IMAGE_TAG:-$DEFAULT_IMAGE_TAG}"
 IMAGE="${FOCUSBOX_IMAGE:-${IMAGE_REPO}:${IMAGE_TAG}}"
+GHCR_IMAGE="${FOCUSBOX_GHCR_IMAGE:-ghcr.io/nickkk333/focusbox:${IMAGE_TAG}}"
+# 随 fpk 分发的镜像构建上下文（server/ + package*.json + Dockerfile）
+CONTEXT_DIR="$CMD_DIR/../app/context"
 PKGVAR="${TRIM_PKGVAR:-/tmp}"
 LOG="${TRIM_TEMP_LOGFILE:-${PKGVAR}/focusbox.log}"
 MAIN_LOG="${PKGVAR}/focusbox-main.log"
@@ -58,20 +64,67 @@ ensure_image() {
     return 0
   fi
 
-  log "pulling image: $IMAGE"
-  attempt=1
-  while [ "$attempt" -le 3 ]; do
-    docker pull "$IMAGE" >> "$MAIN_LOG" 2>&1
+  # 1) 用户预先放置的离线镜像 tar（完全无外网也能安装）。
+  #    同时兼容 CI Release 里导出的 focusbox-<版本>-<架构>.tar（完整 Web 镜像，
+  #    运行时由 FOCUSBOX_API_ONLY=1 切换为纯数据服务）。
+  mkdir -p "$DATA_HOST_DIR" 2>/dev/null || true
+  local image_tar="${DATA_HOST_DIR}/focusbox-api-${IMAGE_TAG}.tar"
+  local candidate source
+  for candidate in \
+      "$image_tar" \
+      "${DATA_HOST_DIR}/focusbox-${IMAGE_TAG}-amd64.tar" \
+      "${DATA_HOST_DIR}/focusbox-${IMAGE_TAG}-arm64.tar" \
+      "${DATA_HOST_DIR}/focusbox-${IMAGE_TAG}.tar"; do
+    [ -f "$candidate" ] || continue
+    log "loading offline image tar: $candidate"
+    docker load -i "$candidate" >> "$MAIN_LOG" 2>&1
     rc=$?
-    log "docker pull attempt=${attempt} exit=${rc}"
+    log "docker load exit=${rc}"
+    [ "$rc" -eq 0 ] || continue
+
+    # CI 导出的 tar 内镜像名是 focusbox:<版本>，重命名为容器启动使用的名字
+    if ! docker image inspect "$IMAGE" >/dev/null 2>&1; then
+      for source in "focusbox:${IMAGE_TAG}" "ghcr.io/nickkk333/focusbox:${IMAGE_TAG}" "focusbox:latest"; do
+        if docker image inspect "$source" >/dev/null 2>&1; then
+          docker tag "$source" "$IMAGE" >> "$MAIN_LOG" 2>&1 || true
+          break
+        fi
+      done
+    fi
+    if docker image inspect "$IMAGE" >/dev/null 2>&1; then
+      return 0
+    fi
+  done
+
+  # 2) 用 fpk 自带的服务端源码在 NAS 本地构建（只需拉取 node:24-alpine 基础镜像）
+  if [ -f "$CONTEXT_DIR/Dockerfile" ]; then
+    log "building image from bundled context: $CONTEXT_DIR"
+    docker build -t "$IMAGE" "$CONTEXT_DIR" >> "$MAIN_LOG" 2>&1
+    rc=$?
+    log "docker build exit=${rc}"
     if [ "$rc" -eq 0 ] && docker image inspect "$IMAGE" >/dev/null 2>&1; then
       return 0
+    fi
+  fi
+
+  # 3) 兜底：从 GHCR 拉取已发布的镜像
+  log "pulling fallback image: $GHCR_IMAGE"
+  attempt=1
+  while [ "$attempt" -le 3 ]; do
+    docker pull "$GHCR_IMAGE" >> "$MAIN_LOG" 2>&1
+    rc=$?
+    log "docker pull attempt=${attempt} exit=${rc}"
+    if [ "$rc" -eq 0 ]; then
+      docker tag "$GHCR_IMAGE" "$IMAGE" >> "$MAIN_LOG" 2>&1
+      if docker image inspect "$IMAGE" >/dev/null 2>&1; then
+        return 0
+      fi
     fi
     attempt=$((attempt + 1))
     sleep 5
   done
 
-  fail "镜像下载失败：${IMAGE}。请确认 NAS 可以访问 ghcr.io、GHCR 包可见性为 Public，或先在 Docker 中手动拉取。"
+  fail "服务端镜像准备失败：${IMAGE}。请查看 ${MAIN_LOG}；也可以把离线镜像放到 ${image_tar} 后重试。"
 }
 
 prepare_data_dir() {
@@ -144,6 +197,7 @@ case "$1" in
       -e HOST=0.0.0.0 \
       -e DATA_DIR=/data \
       -e TZ=Asia/Shanghai \
+      -e FOCUSBOX_API_ONLY=1 \
       -e FOCUSBOX_USERNAME \
       -e FOCUSBOX_PASSWORD \
       -e "FOCUSBOX_FRAME_ANCESTORS='self' http: https:" \

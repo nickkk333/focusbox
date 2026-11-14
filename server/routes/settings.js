@@ -1,21 +1,22 @@
 'use strict';
 
 const express = require('express');
-const { readSettings, writeSettings, SETTINGS_DEFAULTS } = require('../db');
 const { httpError } = require('../utils');
 
-const router = express.Router();
+module.exports = (context) => {
+  const { settings } = context;
+  const router = express.Router();
 
-router.get('/', (req, res) => {
-  res.json({ settings: readSettings(), defaults: SETTINGS_DEFAULTS });
-});
+  router.get('/', (req, res) => {
+    res.json({ settings: settings.get(), defaults: settings.defaults });
+  });
 
-router.patch('/', (req, res) => {
-  if (!req.body || typeof req.body !== 'object' || Array.isArray(req.body)) {
-    throw httpError(400, '设置内容格式错误');
-  }
-  const settings = writeSettings(req.body);
-  res.json({ settings });
-});
+  router.patch('/', (req, res) => {
+    if (!req.body || typeof req.body !== 'object' || Array.isArray(req.body)) {
+      throw httpError(400, '设置内容格式错误');
+    }
+    res.json({ settings: settings.update(req.body) });
+  });
 
-module.exports = router;
+  return router;
+};

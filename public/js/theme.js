@@ -1,6 +1,14 @@
 const THEME_KEY = 'focusbox.theme';
 const media = window.matchMedia('(prefers-color-scheme: dark)');
 
+/** 浏览器 chrome 的颜色取自设计契约，避免主题色在 CSS 与 JS 里各写一份。 */
+function syncMetaColor() {
+  const meta = document.querySelector('meta[name="theme-color"]');
+  if (!meta) return;
+  const value = getComputedStyle(document.documentElement).getPropertyValue('--meta-theme-color').trim();
+  if (value) meta.setAttribute('content', value);
+}
+
 export function resolveTheme(preference) {
   if (preference === 'light' || preference === 'dark') return preference;
   return media.matches ? 'dark' : 'light';
@@ -9,8 +17,7 @@ export function resolveTheme(preference) {
 export function applyTheme(preference, { persist = true } = {}) {
   const effective = resolveTheme(preference);
   document.documentElement.dataset.theme = effective;
-  const meta = document.querySelector('meta[name="theme-color"]');
-  if (meta) meta.setAttribute('content', effective === 'dark' ? '#15161a' : '#f5f3ee');
+  syncMetaColor();
   if (persist) {
     try {
       localStorage.setItem(THEME_KEY, preference);

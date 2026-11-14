@@ -129,6 +129,36 @@ function taskOnDateClause(prefix = '') {
   return `(${start} IS NULL OR ${start} <= ?) AND (${due} IS NULL OR ${due} >= ?)`;
 }
 
+function nowIso() {
+  return new Date().toISOString();
+}
+
+// 合法 YYYY-MM-DD 返回其字符串，否则返回 null（由调用方决定如何取本地今天）。
+function normalizeDate(value) {
+  if (/^\d{4}-\d{2}-\d{2}$/.test(String(value || ''))) return String(value);
+  return null;
+}
+
+function addDays(dateString, amount) {
+  const date = new Date(`${dateString}T00:00:00Z`);
+  date.setUTCDate(date.getUTCDate() + amount);
+  return date.toISOString().slice(0, 10);
+}
+
+function localToUtcIso(dateString, offsetMinutes) {
+  return new Date(Date.parse(`${dateString}T00:00:00Z`) - offsetMinutes * 60000).toISOString();
+}
+
+function dayKeys(from, to) {
+  const keys = [];
+  let cursor = from;
+  while (cursor <= to && keys.length < 400) {
+    keys.push(cursor);
+    cursor = addDays(cursor, 1);
+  }
+  return keys;
+}
+
 module.exports = {
   ApiError,
   httpError,
@@ -142,4 +172,9 @@ module.exports = {
   mapProject,
   localDateModifier,
   taskOnDateClause,
+  nowIso,
+  normalizeDate,
+  addDays,
+  localToUtcIso,
+  dayKeys,
 };

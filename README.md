@@ -65,7 +65,10 @@
 | Web 框架 | Express 4 |
 | 数据库 | Node.js 内置 `node:sqlite`（SQLite） |
 | 前端 | 原生 ES Modules + 手写 CSS，无构建步骤、无 CDN |
+| 测试 | Node.js 内置 `node:test`（无第三方测试依赖） |
 | 部署 | Docker / Docker Compose |
+
+服务端按「启动编排 → 应用组装 → 领域模块 → 数据库」分层：`createApp(context)` 只组装 Express，不监听端口、不读环境变量、不打开数据库，因此测试可以用临时数据库完整驱动所有 HTTP 接口。所有取值（颜色、字号、间距、圆角、动效、层级）集中在 `public/css/tokens.css`，组件样式不写死色值。
 
 ## 快速开始
 
@@ -130,44 +133,62 @@ docker run -d \
 
 ### 方式四：飞牛 fnOS（.fpk 安装包）
 
-GitHub Actions 会构建多架构镜像并推送到 GHCR，同时产出轻量安装包 `focusbox-fnos-<版本>.fpk`。fpk 只包含生命周期脚本、向导和图标，不内置镜像；安装时会从 `ghcr.io/nickkk333/focusbox:<版本>` 拉取对应架构的镜像，因此安装包体积很小，但 NAS 需要能访问 `ghcr.io`。
+fpk 是**纯数据服务端**：只提供安卓客户端需要的 `/api/*`，不分发网页前端（界面已内置在 APK 里）。从飞牛桌面图标或 `http://飞牛IP:8083` 打开的是一个极简服务状态页，不是应用界面。
 
-在飞牛应用中心 → 手动安装，选择 fpk。安装向导会要求填写：
+安装包随包携带服务端源码与专用 `Dockerfile.api`，镜像准备按以下顺序自动回退，不强依赖 GHCR：
+
+1. 已存在 `focusbox-api:<版本>` 镜像 → 直接启动
+2. 数据目录里有离线镜像 tar → `docker load` 导入。可直接把 CI Release 里的 `focusbox-<版本>-amd64.tar` / `-arm64.tar` 按架构放入 `/vol1/@appshare/focusbox/`，或改名为 `focusbox-api-<版本>.tar`；脚本会自动把 tar 内的 `focusbox:<版本>` 重命名为 `focusbox-api:<版本>`
+3. 用 fpk 自带的构建上下文在 NAS 本地 `docker build`（需能拉取 `node:24-alpine` 基础镜像）
+4. 兜底从 GHCR 拉取同版本镜像并打上本地标签
+
+容器启动时设置 `FOCUSBOX_API_ONLY=1`，因此关闭网页前端、启用 CORS，只保留数据 API。安装向导会要求填写：
 
 - 用户名（默认 `admin`）
 - 密码
-- Web 访问端口（默认 `8083`）
+- 数据服务端口（默认 `8083`）
 
-数据目录固定为 `/vol1/@appshare/focusbox`，安装时无需选择。安装完成后可从飞牛桌面图标打开，或访问 `http://飞牛IP:8083`。
+数据目录固定为 `/vol1/@appshare/focusbox`。本地构建包：
 
-> 安装包会创建名为 `focusbox` 的 Docker 容器，并通过安装向导填写的用户名、密码启用登录页。若需要公网访问，请在前面再加一层 HTTPS 反向代理。
->
-> 首次发布后，请到 GitHub 仓库的 Packages 页面确认 `focusbox` 包可见性为 **Public**；否则 fnOS 无法匿名拉取镜像。工作流会尝试自动设置，若失败请手动修改。
+```bash
+FNPACK_BIN=/path/to/fnpack ./deploy/fnos/build.sh 1.1.0 release
+```
+
+产物为 `release/focusbox-fnos-<版本>.fpk` 与 `.sha256`（脚本会修正 Windows 版 `fnpack` 丢失的生命周期脚本执行位）。若需要公网访问，请在前面加一层 HTTPS 反向代理。
 
 ### 方式五：安卓客户端（APK）
 
-仓库的 `android/` 目录包含一个轻量 WebView 客户端。登录页填写服务器 IP / 地址、用户名和密码；顶部菜单可「退出登录」，退出后回到登录页重新填写服务器 IP 即可更换服务器或账号。登录后与在手机浏览器中访问同一地址完全一致，可以查看和修改全部数据，也支持任务、备忘、统计、设置以及 JSON 备份的导入 / 导出。
+应用界面（HTML / CSS / ES Modules）随 APK 安装，**不需要从服务器下载**。首次启动选择数据源，之后可从菜单随时切换：
 
-推送 `v*` tag 时，GitHub Actions 会使用 Android SDK 自动构建 APK，并附加到对应的 GitHub Release：
+| 模式 | 数据位置 | 说明 |
+| --- | --- | --- |
+| 从服务器获取数据 | 飞牛 fpk / 自托管服务端 | 填写 `http://飞牛IP:8083` 与安装向导的用户名、密码 |
+| 本机作为服务器 | 手机 WebView 的 localStorage | 完全离线，内置 JS 数据层复刻全部 API |
+
+两种模式共用同一套界面、同一份 `/api/*` 契约与 v2 备份格式，备份文件可互相导入导出。服务器模式用 HTTP Basic 逐请求认证（服务端 API-only 模式提供 CORS 与预检支持），本机模式不发任何网络请求。
+
+实现要点：WebView 在虚拟源 `https://focusbox.app/` 下由 `shouldInterceptRequest` 提供内置资源（避免 `file://` 下 ES Modules 被 CORS 阻止）；注入的 `native-bridge.js` 在前端之前安装 `fetch` 垫片，按模式把 `/api/*` 分派到远端或内置 `local-api.js`。前端源码不需要为安卓写任何条件分支。
+
+推送 `v*` tag 时，GitHub Actions 会构建 APK 与 fpk 并附加到 Release：
 
 ```text
 focusbox-android-<版本>.apk
 focusbox-android-<版本>.apk.sha256
+focusbox-fnos-<版本>.fpk
+focusbox-fnos-<版本>.fpk.sha256
 ```
 
-直接到 Releases 页面下载安装即可。仓库中已包含 CI 签名密钥 `android/keystore/focusbox.jks`（store password / key password 均为 `focusbox`），仅用于保证后续 APK 可以覆盖安装，不用于保护任何服务器数据。
-
-如需本地构建（可选）：
+本地构建（需要 JDK 17 + Android SDK 34；放在项目 `.tools/` 下会被自动识别）：
 
 ```powershell
-$env:ANDROID_SDK_ROOT = "<Android SDK 路径>"
-$env:JAVA_HOME = "<JDK 17 路径>"
 powershell -ExecutionPolicy Bypass -File android\build.ps1
 ```
 
-输出为 `android/dist/focusbox-android-<版本>.apk`。详细说明见 [`android/README.md`](android/README.md)。
+```bash
+./android/build.sh   # Linux / macOS / CI
+```
 
-安装后在登录页输入例如 `http://192.168.1.20:8083`、安装向导中设置的用户名和密码即可。若服务器未启用登录，用户名和密码可以留空。局域网可以直接使用 HTTP；公网访问请在服务器前配置 HTTPS 反向代理。
+输出为 `android/dist/focusbox-android-<版本>.apk`。仓库中已包含自签名更新密钥 `android/keystore/focusbox.jks`（口令均为 `focusbox`），仅用于保证覆盖安装。安装说明、数据容量限制与迁移方式见 [`android/README.md`](android/README.md)。
 
 ### 方式六：本地开发运行
 
@@ -184,15 +205,23 @@ npm start
 npm run dev
 ```
 
+运行测试（接口集成 + API-only 模式 + 领域模块 + 前端状态/请求层 + 安卓离线数据层，共 52 项）：
+
+```bash
+npm test
+```
+
+测试使用系统临时目录中的独立 SQLite 文件与随机端口，不会读写 `data/` 下的真实数据，结束后自动清理。
+
 默认地址：<http://localhost:3000>。本地数据写入项目下的 `data/focusbox.db`。
 
 ## GitHub Actions 构建与发布
 
 工作流位于 `.github/workflows/release.yml`。推送到 `main`、推送 `v1.2.3` 形式的 tag，或在 Actions 页面手动触发 `Build and Release`，都会构建多架构镜像并推送到 GHCR，同时上传以下产物：
 
-- `focusbox-<版本>-amd64.tar`：amd64 Docker 镜像
+- `focusbox-<版本>-amd64.tar`：amd64 Docker 镜像（完整 Web 版；放入飞牛数据目录可作为 fpk 的离线导入源，运行时由 `FOCUSBOX_API_ONLY=1` 切成纯数据服务）
 - `focusbox-<版本>-arm64.tar`：arm64 Docker 镜像
-- `focusbox-fnos-<版本>.fpk`：飞牛 fnOS 轻量安装包（安装时从 GHCR 拉取镜像）
+- `focusbox-fnos-<版本>.fpk`：飞牛 fnOS 数据服务安装包（自带服务端构建上下文，可离线构建镜像）
 - `focusbox-fnos-<版本>.fpk.sha256`：安装包校验和
 - `focusbox-android-<版本>.apk`：安卓客户端
 - `focusbox-android-<版本>.apk.sha256`：APK 校验和
@@ -207,12 +236,15 @@ npm run dev
 | `HOST` | `0.0.0.0` | HTTP 监听地址 |
 | `DATA_DIR` | 项目下 `data/` | 数据目录；Docker 镜像默认为 `/data` |
 | `DB_FILE` | `$DATA_DIR/focusbox.db` | 可单独指定 SQLite 文件路径 |
-| `FOCUSBOX_USERNAME` | 空 | 可选。设置后与密码一起启用登录页与退出登录 |
-| `FOCUSBOX_PASSWORD` | 空 | 可选。设置后与用户名一起启用登录页与退出登录 |
+| `FOCUSBOX_USERNAME` | 空 | 可选。设置后与密码一起启用登录 |
+| `FOCUSBOX_PASSWORD` | 空 | 可选。设置后与用户名一起启用登录 |
+| `FOCUSBOX_API_ONLY` | `false` | 设为 `1` / `true` 时只提供 `/api/*` 与一个状态页，不服务前端静态资源；启用 CORS 与 OPTIONS 预检，供安卓客户端跨域访问 |
 | `FOCUSBOX_FRAME_ANCESTORS` | `'self'` | 允许嵌入页面的来源；飞牛安装包会设为 `'self' http: https:` |
 | `FOCUSBOX_DATA_DIR` | `/vol1/@appshare/focusbox` | 仅飞牛安装包使用，覆盖宿主机数据目录 |
-| `FOCUSBOX_IMAGE_REPO` | `ghcr.io/nickkk333/focusbox` | 仅飞牛安装包使用，覆盖镜像仓库 |
+| `FOCUSBOX_IMAGE_REPO` | `focusbox-api` | 仅飞牛安装包使用，本地镜像仓库名 |
+| `FOCUSBOX_IMAGE_TAG` | fpk 版本 | 仅飞牛安装包使用，覆盖本地镜像标签 |
 | `FOCUSBOX_IMAGE` | 空 | 仅飞牛安装包使用，直接指定完整镜像名（优先级最高） |
+| `FOCUSBOX_GHCR_IMAGE` | `ghcr.io/nickkk333/focusbox:<版本>` | 仅飞牛安装包使用，兜底拉取的镜像 |
 | `TZ` | 系统时区 | 容器时区，例如 `Asia/Shanghai` |
 
 Compose 中修改端口示例：
@@ -260,18 +292,26 @@ sudo chown -R 1000:1000 ./data
 │   └── workflows/
 │       └── release.yml       # 构建并推送镜像、打包 fnOS fpk 并发布
 ├── android/
-│   ├── src/                  # MainActivity（WebView + 登录/登出页）
+│   ├── src/                  # MainActivity（模式选择、资源拦截、原生桥接）
+│   ├── assets/
+│   │   ├── app/              # 内置前端（public/ 的副本，随 APK 安装）
+│   │   └── bridge/
+│   │       ├── native-bridge.js  # fetch 垫片：按模式分派 /api/*
+│   │       └── local-api.js      # 纯浏览器离线 API（localStorage 持久化）
 │   ├── res/                  # 图标、主题、字符串
+│   ├── keystore/             # 自签名更新密钥
 │   ├── AndroidManifest.xml
-│   └── build.ps1             # 本地 APK 构建脚本
+│   ├── build.ps1 / build.sh  # 本地 / CI APK 构建脚本
+│   └── README.md
 ├── deploy/
-│   └── fnos/                 # 飞牛 fnOS 应用包源
+│   └── fnos/                 # 飞牛 fnOS 数据服务应用包源
 │       ├── manifest
-│       ├── cmd/              # 安装、启停、升级生命周期脚本
+│       ├── Dockerfile.api    # 只含 server/ 的 API-only 镜像定义
+│       ├── cmd/              # 安装、启停、升级生命周期脚本（含本地构建镜像）
 │       ├── config/           # 权限与资源声明
 │       ├── wizard/           # 安装向导（用户名、密码、端口）
-│       ├── app/ui/           # 桌面入口与图标
-│       └── build.sh          # 本地 / CI 打包脚本
+│       ├── app/ui/           # 桌面状态页入口与图标
+│       └── build.sh          # 组装镜像上下文 + fnpack 打包 + 权限修正
 ├── Dockerfile
 ├── docker-entrypoint.sh       # 修正 /data 权限后降权运行
 ├── docker-compose.yml
@@ -280,34 +320,86 @@ sudo chown -R 1000:1000 ./data
 ├── package.json
 ├── package-lock.json
 ├── server/
-│   ├── index.js              # Express 入口、静态资源与错误处理
-│   ├── db.js                 # SQLite 表结构、设置与事务
+│   ├── index.js              # 启动编排：配置 → 数据库 → seed → 监听 → 优雅关闭
+│   ├── config.js             # 集中读取环境变量与版本号
+│   ├── database.js           # 连接、建表、索引、旧库迁移、事务
+│   ├── context.js            # 唯一的依赖组装点
+│   ├── app.js                # createApp(context)：只组装 Express，无副作用
+│   ├── http.js               # 安全头、404、错误处理等横切关注点
+│   ├── auth.js               # 会话 / Cookie / Basic 认证
 │   ├── seed.js               # 首次启动示例数据
-│   ├── utils.js              # 参数校验与数据映射
+│   ├── utils.js              # 纯函数：参数校验、数据映射、日期片段
+│   ├── domain/               # 深模块（业务实现藏在几个方法之后）
+│   │   ├── settings.js       # 设置的默认值、校验与读写
+│   │   ├── overview.js       # 统计、徽标与任务计数（两接口共用）
+│   │   └── backup.js         # 导出 / 导入 / 重置
 │   └── routes/
+│       ├── index.js          # 集中挂载与认证顺序
 │       ├── projects.js       # 项目
 │       ├── tasks.js          # 任务、子任务、时间记录
 │       ├── memos.js          # 备忘与标签
-│       ├── sessions.js       # 番茄记录、统计、徽标
+│       ├── sessions.js       # 番茄记录
 │       ├── settings.js       # 设置
 │       └── data.js           # 导入、导出、重置
+├── test/
+│   ├── api.test.js           # HTTP 接口集成测试（含认证路径）
+│   ├── api-only.test.js      # 纯数据服务模式、CORS 与 Basic 认证
+│   ├── domain.test.js        # 设置 / 统计 / 备份领域测试
+│   ├── frontend.test.mjs     # 前端状态与请求层测试
+│   └── local-api.test.mjs    # 安卓内置离线数据层测试
 └── public/
     ├── index.html
     ├── favicon.svg
     ├── css/
-    │   ├── base.css          # 设计变量与通用组件
-    │   ├── layout.css        # 应用外壳与响应式布局
-    │   └── views.css         # 各业务视图
+    │   ├── tokens.css        # 设计契约：原语 → 语义 → 尺度（唯一取值来源）
+    │   ├── base.css          # 基础样式与通用组件
+    │   ├── layout.css        # 外壳、导航、布局与专注模式
+    │   └── views.css         # 各业务视图与响应式
     └── js/
-        ├── app.js            # 外壳、导航、主题、徽标
-        ├── router.js         # Hash 路由
+        ├── app.js            # 启动编排：登录 → 外壳 → 设置/计时器 → 路由
+        ├── router.js         # Hash 路由（视图只暴露 render）
         ├── timer.js          # 番茄计时状态机
+        ├── theme.js          # 主题偏好（浏览器 chrome 颜色取自 tokens.css）
         ├── markdown.js       # 安全的 Markdown 渲染
         ├── components.js     # 弹窗、抽屉、Toast 等
-        ├── api.js
+        ├── api.js            # 请求层，抛出带状态码的 ApiError
         ├── utils.js
-        └── views/            # 今日、任务、番茄钟、备忘、统计、设置
+        ├── icons.js
+        ├── bus.js            # 事件信号（状态变更已改由 store 承载）
+        ├── core/
+        │   ├── store.js      # 单一状态源：get / patch / subscribe
+        │   └── dom.js        # 可卸载的事件绑定与委托
+        ├── ui/
+        │   └── shell.js      # 外壳模块：mount / update / destroy
+        └── views/            # 今日、任务、番茄钟、备忘、统计、设置、登录
 ```
+
+## 架构约定
+
+后端按「小接口、深实现」组织，调用方只需知道少数几个方法：
+
+| 模块 | 接口 | 藏在后面的是什么 |
+| --- | --- | --- |
+| `loadConfig(env)` | 一个函数 | 全部环境变量、默认值、版本号 |
+| `openDatabase({ file })` | `{ db, tx, close, file }` | 建表、索引、PRAGMA、旧库补列迁移、事务 |
+| `createContext({ config, database })` | 一组已装配好的模块 | 唯一的依赖注入点，模块之间不互相 import |
+| `createApp(context)` | Express app | 中间件顺序、静态资源、SPA fallback、错误处理；无监听、无 IO 副作用。`config.apiOnly` 为真时切换为「仅 API + 状态页 + CORS」 |
+| `createLocalApi({ storage })` | `handle / snapshot / restore / reset` | 安卓本机模式的全部 `/api/*` 语义，以 v2 备份快照持久化在 localStorage |
+| `settings` | `get / update / defaults` | 默认值合并、范围钳制、类型校验、事务写入 |
+| `overview` | `taskCounts / badges / stats` | `/api/stats` 与 `/api/badges` 共用的全部统计 SQL 与时区换算 |
+| `backup` | `snapshot / restore / reset` | 备份 v2 序列化、旧版兼容、清理顺序、设置恢复 |
+
+每个 `server/routes/*.js` 都是 `(context) => Router` 工厂，路由只做参数解析与响应，业务逻辑不留在路由里。前端同理：`store` 用 `get / patch / subscribe` 承载全部共享状态，`shell` 用 `mount / update / destroy` 承载全部外壳 DOM，视图通过事件总线发信号而不直接改外壳。
+
+三种运行形态共用同一套 API 契约：
+
+| 形态 | 前端来源 | 服务端 | 数据 |
+| --- | --- | --- | --- |
+| 浏览器 / Docker 完整版 | 服务端 `public/` | `createApp(context)`（默认模式） | 服务端 SQLite |
+| 飞牛 fpk 数据服务 | 不提供（仅状态页） | `createApp(context)`（`FOCUSBOX_API_ONLY=1`） | 服务端 SQLite |
+| 安卓 APK 本机模式 | `assets/app/` | `assets/bridge/local-api.js` | 手机 localStorage |
+
+安卓服务器模式则是「APK 内置前端 + fpk 数据服务」，通过 `native-bridge.js` 把相对 `/api/*` 改写为带 Basic 认证的跨域请求。所有 HTTP 路径、响应字段、状态码与备份 v2 格式在四种组合中保持一致。
 
 ## API 概览
 
@@ -343,10 +435,13 @@ sudo chown -R 1000:1000 ./data
 
 ## 设计说明
 
-- **单用户、默认无登录**：这是面向个人自托管的工具，默认不包含账号体系。设置 `FOCUSBOX_USERNAME` 与 `FOCUSBOX_PASSWORD` 后会启用登录（飞牛安装包会自动设置）：浏览器登录页只填用户名和密码，安卓客户端登录页多一个服务器 IP / 地址字段，退出登录后回到登录页即可换服务器或账号。登录使用服务端会话（HttpOnly Cookie，30 天有效），登出会立即撤销会话；同时保留 HTTP Basic 校验以兼容旧版客户端与自动化脚本。请勿把未加保护的服务直接暴露到公网；如需远程访问，建议再放在带 HTTPS 的反向代理（如 Nginx、Caddy、Authelia）之后。
+- **单用户、默认无登录**：这是面向个人自托管的工具，默认不包含账号体系。设置 `FOCUSBOX_USERNAME` 与 `FOCUSBOX_PASSWORD` 后会启用登录（飞牛安装包会自动设置）：浏览器使用服务端会话（HttpOnly Cookie，30 天有效）；安卓客户端在首次启动填写服务器地址与凭据，由桥接层改用 HTTP Basic 逐请求认证，以避开跨站 Cookie 限制。请勿把未加保护的服务直接暴露到公网；如需远程访问，建议再放在带 HTTPS 的反向代理（如 Nginx、Caddy、Authelia）之后。
 - **计时在浏览器端运行**：刷新页面后通过 `localStorage` 恢复；关闭所有页面后计时不会在后台继续。专注完成后由浏览器向服务端写入记录。
 - **时区**：统计接口接收浏览器传入的 `tzOffset`，按本地日期聚合数据，避免跨时区导致「今天」错位。
 - **静态资源缓存**：服务端对静态文件使用 `no-cache` + ETag 协商缓存，升级镜像后刷新页面即可拿到新版本。
+- **视觉方向**：沿用重构前的「暖米纸面 + 珊瑚红」配色（浅色 `#f5f3ee` / `#e8553f`，深色 `#15161a` / `#ff6b57`），浅米色侧栏与柔和投影。色值全部集中在 `public/css/tokens.css` 的原语层，语义层与尺度层沿用重构后的设计契约；浅色 / 深色 / 跟随系统共用一套语义变量，组件样式不写死色值，只改这一处即可整体换肤。
+- **层级与无障碍**：首页四张指标卡不再等权重——「今日专注」是唯一的大数字，逾期任务用琥珀色条提示；关键数字使用等宽数字字体。正文使用高对比墨色，珊瑚红强调色用于按钮填充与大号数字；提供可见键盘焦点、跳转主内容链接、40px 图标按钮与 `prefers-reduced-motion` 支持。
+- **窄屏**：侧栏在 960px 以下收为抽屉，快速添加表单的输入框允许收缩以保留提交按钮，主指标数字在 520px 以下降号并禁止折行；390px 视口无横向溢出。
 
 ## 常见问题
 
@@ -358,6 +453,14 @@ sudo chown -R 1000:1000 ./data
 
 **Q：桌面通知没有出现？**  
 浏览器通知通常要求 HTTPS 或 `localhost` 环境，并且需要用户授权。首次开启时请允许通知权限。
+
+**Q：飞牛桌面图标打开只有一个状态页，没有应用界面？**
+
+这是预期行为：fpk 是纯数据服务端，界面内置在安卓 APK 里。请在手机上安装 APK，选择「从服务器获取数据」并填写 `http://飞牛IP:端口` 与安装向导的用户名、密码。若仍连不上，检查容器日志 `/var/apps/focusbox/var/focusbox-main.log` 与防火墙端口。
+
+**Q：安卓「本机作为服务器」模式的数据会同步到 NAS 吗？**
+
+不会，该模式完全离线，数据只存在手机 WebView 的 localStorage。清除应用数据会一并删除，请定期用「导出备份」保存 JSON 文件；需要迁移时在目标模式里用「导入备份」恢复。
 
 **Q：如何升级？**
 

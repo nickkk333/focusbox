@@ -61,12 +61,24 @@ function notify() {
   updateTitle();
 }
 
+// 计时中把剩余时间放进标题；停止后恢复路由标题，而不是粗暴清空。
+let idleTitle = null;
+
 function updateTitle() {
   if (state.running) {
+    if (idleTitle === null) idleTitle = document.title;
     document.title = `${formatClock(state.remaining)} · ${modeMeta(state.mode).label} · 专注盒子`;
-  } else if (document.title !== '专注盒子') {
-    document.title = '专注盒子';
+  } else if (idleTitle !== null) {
+    document.title = idleTitle;
+    idleTitle = null;
   }
+}
+
+/** 路由切换时同步「非计时状态」的标题，避免恢复成上一个页面。 */
+export function setIdleTitle(title) {
+  if (typeof title !== 'string' || !title) return;
+  if (idleTitle === null) document.title = title;
+  else idleTitle = title;
 }
 
 function persist() {
