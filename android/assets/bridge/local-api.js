@@ -10,7 +10,7 @@
 
 const STORAGE_KEY = 'focusbox.local.v2';
 // 与 package.json / MainActivity 的发布版本一致；离线 APK 没有运行时配置文件，故内置常量。
-const VERSION = '1.1.0';
+const VERSION = '1.1.1';
 const PALETTE = ['#ef5b4c', '#f59e0b', '#2f9e79', '#4c7bf4', '#8b5cf6', '#ec4899', '#14b8a6', '#64748b'];
 const MODES = ['focus', 'short', 'long'];
 const TASK_TYPES = ['single', 'daily'];

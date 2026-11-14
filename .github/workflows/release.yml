@@ -122,7 +122,7 @@ jobs:
           # 故意保持 root/当前用户属主，验证入口脚本能修正 /data 权限。
           docker run -d \
             --name focusbox-smoke \
-            -p 18083:3000 \
+            -p 18083:8082 \
             -e FOCUSBOX_USERNAME=admin \
             -e FOCUSBOX_PASSWORD=secret123 \
             -v "$PWD/.smoke-data:/data" \

@@ -5,11 +5,11 @@ FROM node:24-alpine
 
 LABEL org.opencontainers.image.title="FocusBox" \
       org.opencontainers.image.description="备忘录、番茄钟与任务清单于一体的自托管效率工具" \
-      org.opencontainers.image.version="1.1.0" \
+      org.opencontainers.image.version="1.1.1" \
       org.opencontainers.image.licenses="MIT"
 
 ENV NODE_ENV=production \
-    PORT=3000 \
+    PORT=8082 \
     HOST=0.0.0.0 \
     DATA_DIR=/data
 
@@ -33,11 +33,11 @@ RUN chmod +x /usr/local/bin/docker-entrypoint.sh \
     && mkdir -p /data \
     && chown node:node /data
 
-EXPOSE 3000
+EXPOSE 8082
 VOLUME ["/data"]
 
 HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
-  CMD node -e "fetch('http://127.0.0.1:' + (process.env.PORT || 3000) + '/api/health').then(function (r) { return r.ok ? r.json() : Promise.reject(new Error('HTTP ' + r.status)); }).then(function (d) { process.exit(d.status === 'ok' ? 0 : 1); }).catch(function () { process.exit(1); })"
+  CMD node -e "fetch('http://127.0.0.1:' + (process.env.PORT || 8082) + '/api/health').then(function (r) { return r.ok ? r.json() : Promise.reject(new Error('HTTP ' + r.status)); }).then(function (d) { process.exit(d.status === 'ok' ? 0 : 1); }).catch(function () { process.exit(1); })"
 
 ENTRYPOINT ["docker-entrypoint.sh"]
 CMD ["node", "server/index.js"]

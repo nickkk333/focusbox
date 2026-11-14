@@ -21,7 +21,7 @@ function loadConfig(env = process.env) {
   );
 
   return Object.freeze({
-    port: Number(env.PORT) || 3000,
+    port: Number(env.PORT) || 8082,
     host: env.HOST || '0.0.0.0',
     dataDir,
     dbFile,

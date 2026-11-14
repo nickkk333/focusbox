@@ -78,7 +78,7 @@
 docker compose up -d --build
 ```
 
-打开 <http://localhost:3000>。
+打开 <http://localhost:8082>。
 
 停止服务：
 
@@ -98,7 +98,7 @@ docker compose down -v
 docker build -t focusbox:1.0.7 .
 docker run -d \
   --name focusbox \
-  -p 3000:3000 \
+  -p 8082:8082 \
   -v focusbox-data:/data \
   --restart unless-stopped \
   focusbox:1.0.7
@@ -112,7 +112,7 @@ docker run -d \
 docker load -i release/focusbox-1.0.7-amd64.tar
 docker run -d \
   --name focusbox \
-  -p 3000:3000 \
+  -p 8082:8082 \
   -v focusbox-data:/data \
   --restart unless-stopped \
   focusbox:1.0.7
@@ -123,7 +123,7 @@ docker run -d \
 ```bash
 docker run -d \
   --name focusbox \
-  -p 3000:3000 \
+  -p 8082:8082 \
   -v focusbox-data:/data \
   --restart unless-stopped \
   -e FOCUSBOX_USERNAME=admin \
@@ -151,7 +151,7 @@ fpk 是**纯数据服务端**：只提供安卓客户端需要的 `/api/*`，不
 数据目录固定为 `/vol1/@appshare/focusbox`。本地构建包：
 
 ```bash
-FNPACK_BIN=/path/to/fnpack ./deploy/fnos/build.sh 1.1.0 release
+FNPACK_BIN=/path/to/fnpack ./deploy/fnos/build.sh 1.1.1 release
 ```
 
 产物为 `release/focusbox-fnos-<版本>.fpk` 与 `.sha256`（脚本会修正 Windows 版 `fnpack` 丢失的生命周期脚本执行位）。若需要公网访问，请在前面加一层 HTTPS 反向代理。
@@ -213,7 +213,7 @@ npm test
 
 测试使用系统临时目录中的独立 SQLite 文件与随机端口，不会读写 `data/` 下的真实数据，结束后自动清理。
 
-默认地址：<http://localhost:3000>。本地数据写入项目下的 `data/focusbox.db`。
+默认地址：<http://localhost:8082>。本地数据写入项目下的 `data/focusbox.db`。
 
 ## GitHub Actions 构建与发布
 
@@ -232,7 +232,7 @@ npm test
 
 | 环境变量 | 默认值 | 说明 |
 | --- | --- | --- |
-| `PORT` | `3000` | HTTP 监听端口 |
+| `PORT` | `8082` | HTTP 监听端口 |
 | `HOST` | `0.0.0.0` | HTTP 监听地址 |
 | `DATA_DIR` | 项目下 `data/` | 数据目录；Docker 镜像默认为 `/data` |
 | `DB_FILE` | `$DATA_DIR/focusbox.db` | 可单独指定 SQLite 文件路径 |
@@ -251,7 +251,7 @@ Compose 中修改端口示例：
 
 ```yaml
 ports:
-  - "8080:3000"
+  - "8082:8082"
 ```
 
 ## 数据持久化与备份

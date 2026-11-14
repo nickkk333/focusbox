@@ -1,7 +1,7 @@
 # 专注盒子 FocusBox - 飞牛 fnOS 应用包描述
 # 版本号由 deploy/fnos/build.sh 在打包时写入，必须为 X.Y.Z。
 appname=focusbox
-version=1.1.0
+version=1.1.1
 display_name=专注盒子
 desc=FocusBox 安卓客户端的数据服务端，只提供任务、备忘、专注记录等 API；应用界面随安卓 APK 分发。
 source=thirdparty
@@ -10,10 +10,10 @@ maintainer=FocusBox
 maintainer_url=https://github.com/nickkk333/focusbox
 distributor=FocusBox
 distributor_url=https://github.com/nickkk333/focusbox
-os_min_version=1.2.0
+os_min_version=1.0.0
 desktop_uidir=ui
 desktop_applaunchname=focusbox.main
-service_port=8083
+service_port=8082
 checkport=false
 ctl_stop=true
 disable_authorization_path=true

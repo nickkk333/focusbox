@@ -12,11 +12,14 @@
 
 set +e
 
+# fnOS 调用生命周期脚本时 PATH 几乎为空，显式补齐才能找到 docker 等命令。
+export PATH="/usr/local/bin:/usr/local/sbin:/usr/bin:/usr/sbin:/bin:/sbin${PATH:+:$PATH}"
+
 CMD_DIR="$(cd "$(dirname "$0")" && pwd)"
 CONTAINER="${FOCUSBOX_CONTAINER:-focusbox}"
-APP_VERSION="${TRIM_APPVER:-1.1.0}"
+APP_VERSION="${TRIM_APPVER:-1.1.1}"
 # build.sh 会把 DEFAULT_IMAGE_TAG 改成实际版本；FOCUSBOX_IMAGE_TAG 可覆盖。
-DEFAULT_IMAGE_TAG="1.1.0"
+DEFAULT_IMAGE_TAG="1.1.1"
 IMAGE_REPO="${FOCUSBOX_IMAGE_REPO:-focusbox-api}"
 IMAGE_TAG="${FOCUSBOX_IMAGE_TAG:-$DEFAULT_IMAGE_TAG}"
 IMAGE="${FOCUSBOX_IMAGE:-${IMAGE_REPO}:${IMAGE_TAG}}"
@@ -28,7 +31,7 @@ LOG="${TRIM_TEMP_LOGFILE:-${PKGVAR}/focusbox.log}"
 MAIN_LOG="${PKGVAR}/focusbox-main.log"
 
 # 安装向导字段（fnOS 会把向导值作为环境变量传入生命周期脚本）
-PORT="${wizard_port:-${TRIM_SERVICE_PORT:-8083}}"
+PORT="${wizard_port:-${TRIM_SERVICE_PORT:-8082}}"
 APP_USERNAME="${wizard_username:-}"
 APP_PASSWORD="${wizard_password:-}"
 
@@ -51,10 +54,10 @@ fail() {
 
 normalize_port() {
   case "$PORT" in
-    ''|*[!0-9]*) PORT=8083 ;;
+    ''|*[!0-9]*) PORT=8082 ;;
   esac
   if [ "$PORT" -lt 1 ] || [ "$PORT" -gt 65535 ]; then
-    PORT=8083
+    PORT=8082
   fi
 }
 
@@ -192,8 +195,8 @@ case "$1" in
     docker run -d \
       --name "$CONTAINER" \
       --restart unless-stopped \
-      -p "${PORT}:3000" \
-      -e PORT=3000 \
+      -p "${PORT}:8082" \
+      -e PORT=8082 \
       -e HOST=0.0.0.0 \
       -e DATA_DIR=/data \
       -e TZ=Asia/Shanghai \

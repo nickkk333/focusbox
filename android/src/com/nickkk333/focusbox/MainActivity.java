@@ -226,7 +226,7 @@ public class MainActivity extends Activity {
                 }), cardParams(dp(16)));
 
         TextView note = new TextView(this);
-        note.setText("当前版本 v1.1.0 · 两种模式共用同一套界面与数据格式，备份文件可以互相导入。");
+        note.setText("当前版本 v1.1.1 · 两种模式共用同一套界面与数据格式，备份文件可以互相导入。");
         note.setTextSize(12);
         note.setTextColor(Color.rgb(138, 145, 156));
         LinearLayout.LayoutParams noteLp = new LinearLayout.LayoutParams(
@@ -544,7 +544,7 @@ public class MainActivity extends Activity {
         // 首页由 assets 动态生成，配置变更后必须拿到新版本
         settings.setCacheMode(WebSettings.LOAD_NO_CACHE);
         settings.setMediaPlaybackRequiresUserGesture(true);
-        settings.setUserAgentString(settings.getUserAgentString() + " FocusBoxAndroid/1.1.0");
+        settings.setUserAgentString(settings.getUserAgentString() + " FocusBoxAndroid/1.1.1");
 
         webView.setBackgroundColor(Color.WHITE);
         webView.setOverScrollMode(View.OVER_SCROLL_IF_CONTENT_SCROLLS);

@@ -46,7 +46,7 @@
         "type": "text",
         "field": "wizard_port",
         "label": "Web 访问端口",
-        "initValue": "8083",
+        "initValue": "8082",
         "rules": [
           {
             "required": true,
@@ -60,7 +60,7 @@
       },
       {
         "type": "tips",
-        "helpText": "默认端口为 8083，安卓客户端请填写 http://飞牛IP:8083。从飞牛桌面图标打开的是服务状态页（不是应用界面），请用安卓客户端操作。\n\n数据目录固定映射到 /vol1/@appshare/focusbox，无需手动指定。"
+        "helpText": "默认端口为 8082，安卓客户端请填写 http://飞牛IP:8082。从飞牛桌面图标打开的是服务状态页（不是应用界面），请用安卓客户端操作。\n\n数据目录固定映射到 /vol1/@appshare/focusbox，无需手动指定。"
       }
     ]
   }

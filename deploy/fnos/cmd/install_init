@@ -2,6 +2,9 @@
 # 安装前检查：fnOS 必须已启用 Docker，且 /vol1 存储卷存在。
 set +e
 
+# fnOS 调用生命周期脚本时 PATH 几乎为空，显式补齐才能找到 docker 等命令。
+export PATH="/usr/local/bin:/usr/local/sbin:/usr/bin:/usr/sbin:/bin:/sbin${PATH:+:$PATH}"
+
 LOG="${TRIM_TEMP_LOGFILE:-/tmp/focusbox-install.log}"
 
 if ! command -v docker >/dev/null 2>&1; then
