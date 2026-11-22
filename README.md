@@ -92,27 +92,27 @@ docker compose down -v
 ### 方式二：直接使用 Docker 命令
 
 ```bash
-docker build -t focusbox:1.0.7 .
+docker build -t focusbox:1.0.9 .
 docker run -d \
   --name focusbox \
   -p 3000:3000 \
   -v focusbox-data:/data \
   --restart unless-stopped \
-  focusbox:1.0.7
+  focusbox:1.0.9
 ```
 
 ### 方式三：使用已导出的镜像文件
 
-如果当前目录的 `release/` 下已有 CI 导出的镜像 tar（例如 `focusbox-1.0.7-amd64.tar`）：
+如果当前目录的 `release/` 下已有 CI 导出的镜像 tar（例如 `focusbox-1.0.9-amd64.tar`）：
 
 ```bash
-docker load -i release/focusbox-1.0.7-amd64.tar
+docker load -i release/focusbox-1.0.9-amd64.tar
 docker run -d \
   --name focusbox \
   -p 3000:3000 \
   -v focusbox-data:/data \
   --restart unless-stopped \
-  focusbox:1.0.7
+  focusbox:1.0.9
 ```
 
 如需启用登录：
@@ -125,7 +125,7 @@ docker run -d \
   --restart unless-stopped \
   -e FOCUSBOX_USERNAME=admin \
   -e FOCUSBOX_PASSWORD=你的密码 \
-  focusbox:1.0.7
+  focusbox:1.0.9
 ```
 
 ### 方式四：飞牛 fnOS（.fpk 安装包）
@@ -146,7 +146,7 @@ GitHub Actions 会构建多架构镜像并推送到 GHCR，同时产出轻量安
 
 ### 方式五：安卓客户端（APK）
 
-仓库的 `android/` 目录包含一个轻量 WebView 客户端。登录页填写服务器 IP / 地址、用户名和密码；顶部菜单可「退出登录」，退出后回到登录页重新填写服务器 IP 即可更换服务器或账号。登录后与在手机浏览器中访问同一地址完全一致，可以查看和修改全部数据，也支持任务、备忘、统计、设置以及 JSON 备份的导入 / 导出。
+仓库的 `android/` 目录包含一个原生 Android 客户端（Java + Android SDK，不使用 WebView）。登录页填写服务器 IP / 地址、用户名和密码，登录后直接调用 REST 接口，提供今日工作台、任务清单、番茄钟、备忘与统计五个页面，任务详情与网页端一致（字段编辑、子任务、时间记录、每日打卡日历）；顶部「退出」可回到登录页更换服务器或账号。客户端不依赖 AndroidX 或第三方网络库，通过 `aapt2` + `javac` + `d8` 手工构建。
 
 推送 `v*` tag 时，GitHub Actions 会使用 Android SDK 自动构建 APK，并附加到对应的 GitHub Release：
 
@@ -260,7 +260,7 @@ sudo chown -R 1000:1000 ./data
 │   └── workflows/
 │       └── release.yml       # 构建并推送镜像、打包 fnOS fpk 并发布
 ├── android/
-│   ├── src/                  # MainActivity（WebView + 登录/登出页）
+│   ├── src/                  # 原生 Java 客户端（登录、今日、任务、番茄钟、备忘、统计）
 │   ├── res/                  # 图标、主题、字符串
 │   ├── AndroidManifest.xml
 │   └── build.ps1             # 本地 APK 构建脚本
