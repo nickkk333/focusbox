@@ -4,7 +4,6 @@ dist
 release
 docs
 deploy
-android
 .github
 .git
 .gitignore

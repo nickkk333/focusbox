@@ -115,7 +115,7 @@ function clearSessionCookie(req) {
 function requireAuth(req, res, next) {
   if (!req.path.startsWith('/api/')) return next();
   if (authenticatedUser(req).authenticated) return next();
-  // 保留 Basic realm，让旧版安卓 WebView 仍能自动应答；浏览器 fetch 不会因此弹出原生认证框。
+  // 保留 Basic realm，让旧版客户端仍能自动应答；浏览器 fetch 不会因此弹出原生认证框。
   res.setHeader('WWW-Authenticate', 'Basic realm="FocusBox", charset="UTF-8"');
   res.status(401).json({ error: '需要登录', code: 'UNAUTHORIZED' });
 }

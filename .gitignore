@@ -4,8 +4,6 @@ dist/
 release/
 deploy/fnos/app/images/*.tar
 deploy/fnos/*.fpk
-android/build/
-android/dist/
 *.log
 .DS_Store
 .env

@@ -55,7 +55,7 @@
 - JSON 全量导出 / 导入（备份格式 v2，包含任务类型与每日打卡记录；旧版备份可直接导入）
 - 一键恢复初始示例数据
 - 数据持久化到 Docker 卷
-- 可选登录 / 退出登录：设置 `FOCUSBOX_USERNAME` / `FOCUSBOX_PASSWORD` 后启用；浏览器登录页只需用户名和密码，安卓客户端登录页额外填写服务器 IP，退出登录后可更换服务器或账号；飞牛安装包会在安装向导中自动配置
+- 可选登录 / 退出登录：设置 `FOCUSBOX_USERNAME` / `FOCUSBOX_PASSWORD` 后启用；浏览器登录页只需用户名和密码，退出登录后可更换账号；飞牛安装包会在安装向导中自动配置
 
 ## 技术栈
 
@@ -144,32 +144,7 @@ GitHub Actions 会构建多架构镜像并推送到 GHCR，同时产出轻量安
 >
 > 首次发布后，请到 GitHub 仓库的 Packages 页面确认 `focusbox` 包可见性为 **Public**；否则 fnOS 无法匿名拉取镜像。工作流会尝试自动设置，若失败请手动修改。
 
-### 方式五：安卓客户端（APK）
-
-仓库的 `android/` 目录包含一个原生 Android 客户端（Java + Android SDK，不使用 WebView）。登录页填写服务器 IP / 地址、用户名和密码，登录后直接调用 REST 接口，提供今日工作台、任务清单、番茄钟、备忘与统计五个页面，任务详情与网页端一致（字段编辑、子任务、时间记录、每日打卡日历）；顶部「退出」可回到登录页更换服务器或账号。客户端不依赖 AndroidX 或第三方网络库，通过 `aapt2` + `javac` + `d8` 手工构建。
-
-推送 `v*` tag 时，GitHub Actions 会使用 Android SDK 自动构建 APK，并附加到对应的 GitHub Release：
-
-```text
-focusbox-android-<版本>.apk
-focusbox-android-<版本>.apk.sha256
-```
-
-直接到 Releases 页面下载安装即可。仓库中已包含 CI 签名密钥 `android/keystore/focusbox.jks`（store password / key password 均为 `focusbox`），仅用于保证后续 APK 可以覆盖安装，不用于保护任何服务器数据。
-
-如需本地构建（可选）：
-
-```powershell
-$env:ANDROID_SDK_ROOT = "<Android SDK 路径>"
-$env:JAVA_HOME = "<JDK 17 路径>"
-powershell -ExecutionPolicy Bypass -File android\build.ps1
-```
-
-输出为 `android/dist/focusbox-android-<版本>.apk`。详细说明见 [`android/README.md`](android/README.md)。
-
-安装后在登录页输入例如 `http://192.168.1.20:8083`、安装向导中设置的用户名和密码即可。若服务器未启用登录，用户名和密码可以留空。局域网可以直接使用 HTTP；公网访问请在服务器前配置 HTTPS 反向代理。
-
-### 方式六：本地开发运行
+### 方式五：本地开发运行
 
 要求 Node.js **24 或更高版本**（使用内置 `node:sqlite`）。
 
@@ -194,8 +169,6 @@ npm run dev
 - `focusbox-<版本>-arm64.tar`：arm64 Docker 镜像
 - `focusbox-fnos-<版本>.fpk`：飞牛 fnOS 轻量安装包（安装时从 GHCR 拉取镜像）
 - `focusbox-fnos-<版本>.fpk.sha256`：安装包校验和
-- `focusbox-android-<版本>.apk`：安卓客户端
-- `focusbox-android-<版本>.apk.sha256`：APK 校验和
 
 镜像地址为 `ghcr.io/nickkk333/focusbox:<版本>` 和 `ghcr.io/nickkk333/focusbox:latest`。tag 推送会自动创建 GitHub Release；手动触发时可勾选 `publish` 创建 Release。工作流还会启动 amd64 镜像做健康检查、数据目录权限与登录/登出冒烟测试。
 
@@ -259,11 +232,6 @@ sudo chown -R 1000:1000 ./data
 ├── .github/
 │   └── workflows/
 │       └── release.yml       # 构建并推送镜像、打包 fnOS fpk 并发布
-├── android/
-│   ├── src/                  # 原生 Java 客户端（登录、今日、任务、番茄钟、备忘、统计）
-│   ├── res/                  # 图标、主题、字符串
-│   ├── AndroidManifest.xml
-│   └── build.ps1             # 本地 APK 构建脚本
 ├── deploy/
 │   └── fnos/                 # 飞牛 fnOS 应用包源
 │       ├── manifest
@@ -343,7 +311,7 @@ sudo chown -R 1000:1000 ./data
 
 ## 设计说明
 
-- **单用户、默认无登录**：这是面向个人自托管的工具，默认不包含账号体系。设置 `FOCUSBOX_USERNAME` 与 `FOCUSBOX_PASSWORD` 后会启用登录（飞牛安装包会自动设置）：浏览器登录页只填用户名和密码，安卓客户端登录页多一个服务器 IP / 地址字段，退出登录后回到登录页即可换服务器或账号。登录使用服务端会话（HttpOnly Cookie，30 天有效），登出会立即撤销会话；同时保留 HTTP Basic 校验以兼容旧版客户端与自动化脚本。请勿把未加保护的服务直接暴露到公网；如需远程访问，建议再放在带 HTTPS 的反向代理（如 Nginx、Caddy、Authelia）之后。
+- **单用户、默认无登录**：这是面向个人自托管的工具，默认不包含账号体系。设置 `FOCUSBOX_USERNAME` 与 `FOCUSBOX_PASSWORD` 后会启用登录（飞牛安装包会自动设置）：浏览器登录页只需填写用户名和密码，退出登录后回到登录页即可更换账号。登录使用服务端会话（HttpOnly Cookie，30 天有效），登出会立即撤销会话；同时保留 HTTP Basic 校验以兼容旧版客户端与自动化脚本。请勿把未加保护的服务直接暴露到公网；如需远程访问，建议再放在带 HTTPS 的反向代理（如 Nginx、Caddy、Authelia）之后。
 - **计时在浏览器端运行**：刷新页面后通过 `localStorage` 恢复；关闭所有页面后计时不会在后台继续。专注完成后由浏览器向服务端写入记录。
 - **时区**：统计接口接收浏览器传入的 `tzOffset`，按本地日期聚合数据，避免跨时区导致「今天」错位。
 - **静态资源缓存**：服务端对静态文件使用 `no-cache` + ETag 协商缓存，升级镜像后刷新页面即可拿到新版本。
