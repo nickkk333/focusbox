@@ -121,6 +121,37 @@ function elapsedSeconds() {
   return Math.max(0, state.duration - state.remaining);
 }
 
+// 把计时结束时间同步到服务端，页面关闭后也能按时推送提醒。
+function syncServerReminder() {
+  if (!state.running || !state.endAt) return;
+  api
+    .post('/api/notifications/pomodoro/sync', {
+      endAt: new Date(state.endAt).toISOString(),
+      startedAt: state.startedAt,
+      mode: state.mode,
+      durationSeconds: state.duration,
+      taskId: state.taskId,
+      taskTitle: state.taskTitle,
+    })
+    .catch(() => {
+      /* 提醒同步失败不影响计时 */
+    });
+}
+
+function clearServerReminder() {
+  api.delete('/api/notifications/pomodoro/sync').catch(() => {
+    /* 忽略提醒取消失败 */
+  });
+}
+
+function fireServerReminder(endAt) {
+  api
+    .post('/api/notifications/pomodoro/fire', { endAt: endAt || null })
+    .catch(() => {
+      /* 忽略提醒触发失败 */
+    });
+}
+
 function recordSession({ mode, durationSeconds, startedAt, endedAt, taskId, completed }) {
   api
     .post('/api/sessions', {
@@ -242,6 +273,7 @@ function complete() {
     taskId,
     completed: true,
   });
+  fireServerReminder(endedAt);
 
   if (mode === 'focus') state.round += 1;
   const nextMode = chooseNext(mode);
@@ -284,6 +316,7 @@ export function init(config = {}) {
       state.remaining = remaining;
       startTicker();
       if (remaining <= 0) tick();
+      else syncServerReminder();
     } else {
       state.remaining = Math.min(state.remaining, state.duration);
     }
@@ -312,6 +345,7 @@ export function start() {
   startTicker();
   persist();
   notify();
+  syncServerReminder();
 }
 
 export function pause() {
@@ -322,6 +356,7 @@ export function pause() {
   stopTicker();
   persist();
   notify();
+  clearServerReminder();
 }
 
 export function toggle() {
@@ -354,6 +389,7 @@ export function reset({ silent = false } = {}) {
   state.remaining = state.duration;
   persist();
   notify();
+  clearServerReminder();
   if (!silent) toast('计时已重置', 'info', 1600);
 }
 
@@ -367,6 +403,7 @@ export function skip() {
   setModeInternal(next);
   persist();
   notify();
+  clearServerReminder();
   toast(`已跳到${modeMeta(next).label}`, 'info', 1800);
 }
 
@@ -381,6 +418,7 @@ export function setMode(mode) {
   setModeInternal(mode);
   persist();
   notify();
+  clearServerReminder();
   return true;
 }
 
@@ -389,6 +427,7 @@ export function setTask(taskId, taskTitle = null) {
   state.taskTitle = taskTitle || null;
   persist();
   notify();
+  if (state.running) syncServerReminder();
 }
 
 export function clearTask() {
@@ -408,6 +447,7 @@ export function configure(nextSettings = {}) {
   }
   persist();
   notify();
+  if (state.running) syncServerReminder();
 }
 
 export function getState() {

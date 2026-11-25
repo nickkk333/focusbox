@@ -97,6 +97,30 @@ db.exec(`
     value TEXT NOT NULL
   );
 
+  -- 应用内提醒消息，dedupe_key 用来避免定时任务重复推送同一条提醒。
+  CREATE TABLE IF NOT EXISTS notifications (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    kind TEXT NOT NULL,
+    title TEXT NOT NULL,
+    body TEXT NOT NULL DEFAULT '',
+    link TEXT,
+    dedupe_key TEXT UNIQUE,
+    read INTEGER NOT NULL DEFAULT 0,
+    created_at TEXT NOT NULL
+  );
+
+  -- 番茄钟在浏览器端运行，启动时把结束时间同步到这里，服务端可按时推送提醒。
+  CREATE TABLE IF NOT EXISTS timer_reminders (
+    id INTEGER PRIMARY KEY CHECK (id = 1),
+    end_at TEXT NOT NULL,
+    started_at TEXT,
+    mode TEXT NOT NULL,
+    duration_seconds INTEGER NOT NULL DEFAULT 0,
+    task_id INTEGER,
+    task_title TEXT,
+    created_at TEXT NOT NULL
+  );
+
   -- 登录会话，与专注记录表 sessions 区分开。
   CREATE TABLE IF NOT EXISTS auth_sessions (
     token TEXT PRIMARY KEY,
@@ -113,6 +137,8 @@ db.exec(`
   CREATE INDEX IF NOT EXISTS idx_sessions_task ON sessions(task_id);
   CREATE INDEX IF NOT EXISTS idx_subtasks_task ON subtasks(task_id);
   CREATE INDEX IF NOT EXISTS idx_memos_created ON memos(created_at);
+  CREATE INDEX IF NOT EXISTS idx_notifications_read ON notifications(read, id);
+  CREATE INDEX IF NOT EXISTS idx_notifications_created ON notifications(created_at);
 `);
 
 // 旧版本数据库没有 start_date / task_type 列，启动时补列。
@@ -139,7 +165,21 @@ const SETTINGS_DEFAULTS = Object.freeze({
   notificationsEnabled: true,
   dailyGoalMinutes: 120,
   theme: 'system',
+  remindersEnabled: true,
+  taskRemindersEnabled: true,
+  taskReminderTime: '08:30',
+  dailyCheckinEnabled: true,
+  dailyCheckinTime: '09:00',
+  dailyDigestEnabled: true,
+  dailyDigestTime: '21:00',
+  pomodoroRemindersEnabled: true,
+  reminderTimezone: 'Asia/Shanghai',
+  webhookEnabled: false,
+  webhookType: 'generic',
+  webhookUrl: '',
 });
+
+const WEBHOOK_TYPES = Object.freeze(['generic', 'bark', 'ntfy', 'serverchan', 'wecom', 'dingtalk', 'feishu']);
 
 function nowIso() {
   return new Date().toISOString();
@@ -165,6 +205,28 @@ function clampInt(value, min, max, fallback) {
   const number = Number.parseInt(value, 10);
   if (!Number.isFinite(number)) return fallback;
   return Math.min(max, Math.max(min, number));
+}
+
+function normalizeTime(value, fallback) {
+  const text = String(value ?? '').trim();
+  return /^([01]\d|2[0-3]):[0-5]\d$/.test(text) ? text : fallback;
+}
+
+function normalizeTimezone(value, fallback) {
+  const text = String(value ?? '').trim().slice(0, 64);
+  if (!text) return fallback;
+  try {
+    new Intl.DateTimeFormat('en-US', { timeZone: text }).format(new Date());
+    return text;
+  } catch (_) {
+    return fallback;
+  }
+}
+
+function normalizeWebhookUrl(value, fallback) {
+  const text = String(value ?? '').trim().slice(0, 1000);
+  if (!text) return '';
+  return /^https?:\/\//i.test(text) ? text : fallback;
 }
 
 function readSettings() {
@@ -196,6 +258,32 @@ function normalizeSettings(input, base) {
     if ('soundEnabled' in input) next.soundEnabled = Boolean(input.soundEnabled);
     if ('notificationsEnabled' in input) next.notificationsEnabled = Boolean(input.notificationsEnabled);
     if ('theme' in input && ['light', 'dark', 'system'].includes(input.theme)) next.theme = input.theme;
+    if ('remindersEnabled' in input) next.remindersEnabled = Boolean(input.remindersEnabled);
+    if ('taskRemindersEnabled' in input) next.taskRemindersEnabled = Boolean(input.taskRemindersEnabled);
+    if ('dailyCheckinEnabled' in input) next.dailyCheckinEnabled = Boolean(input.dailyCheckinEnabled);
+    if ('dailyDigestEnabled' in input) next.dailyDigestEnabled = Boolean(input.dailyDigestEnabled);
+    if ('pomodoroRemindersEnabled' in input) {
+      next.pomodoroRemindersEnabled = Boolean(input.pomodoroRemindersEnabled);
+    }
+    if ('webhookEnabled' in input) next.webhookEnabled = Boolean(input.webhookEnabled);
+    if ('taskReminderTime' in input) {
+      next.taskReminderTime = normalizeTime(input.taskReminderTime, current.taskReminderTime);
+    }
+    if ('dailyCheckinTime' in input) {
+      next.dailyCheckinTime = normalizeTime(input.dailyCheckinTime, current.dailyCheckinTime);
+    }
+    if ('dailyDigestTime' in input) {
+      next.dailyDigestTime = normalizeTime(input.dailyDigestTime, current.dailyDigestTime);
+    }
+    if ('reminderTimezone' in input) {
+      next.reminderTimezone = normalizeTimezone(input.reminderTimezone, current.reminderTimezone);
+    }
+    if ('webhookType' in input && WEBHOOK_TYPES.includes(input.webhookType)) {
+      next.webhookType = input.webhookType;
+    }
+    if ('webhookUrl' in input) {
+      next.webhookUrl = normalizeWebhookUrl(input.webhookUrl, current.webhookUrl);
+    }
   }
   return next;
 }
@@ -228,6 +316,7 @@ module.exports = {
   DB_FILE,
   DATA_DIR,
   SETTINGS_DEFAULTS,
+  WEBHOOK_TYPES,
   nowIso,
   transaction,
   clampInt,

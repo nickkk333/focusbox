@@ -7,6 +7,23 @@ import { esc, fileToText } from '../utils.js';
 
 let currentSettings = null;
 
+const WEBHOOK_OPTIONS = [
+  ['generic', '自定义 Webhook（JSON）'],
+  ['bark', 'Bark（iOS）'],
+  ['ntfy', 'ntfy'],
+  ['serverchan', 'Server酱'],
+  ['wecom', '企业微信群机器人'],
+  ['dingtalk', '钉钉群机器人'],
+  ['feishu', '飞书群机器人'],
+];
+
+function webhookOptions(selected) {
+  return WEBHOOK_OPTIONS.map(
+    ([value, label]) =>
+      `<option value="${value}" ${value === selected ? 'selected' : ''}>${label}</option>`
+  ).join('');
+}
+
 function themeOption(value, label, description, active) {
   return `
     <button type="button" class="theme-option ${active ? 'active' : ''}" data-theme-choice="${value}">
@@ -67,6 +84,68 @@ export async function render(container) {
           <div class="settings-actions">
             <span class="hint">修改后点击保存，正在进行的计时不会受影响</span>
             <button type="submit" class="btn btn-primary">保存设置</button>
+          </div>
+        </form>
+      </section>
+
+      <section class="card settings-card settings-wide">
+        <div class="card-head">
+          <div>
+            <h3>消息提醒</h3>
+            <p>任务到期、每日打卡、番茄结束与每日汇总</p>
+          </div>
+          <span class="settings-icon">${icon('bell', 18)}</span>
+        </div>
+        <form id="reminder-settings" class="form-stack">
+          <div class="switch-list">
+            ${switchControl('remindersEnabled', currentSettings.remindersEnabled, '启用服务端提醒（应用内消息 + 外部推送）')}
+            ${switchControl('taskRemindersEnabled', currentSettings.taskRemindersEnabled, '任务截止提醒：汇总今天到期和已逾期的任务')}
+            ${switchControl('dailyCheckinEnabled', currentSettings.dailyCheckinEnabled, '每日打卡提醒：提醒尚未打卡的每日任务')}
+            ${switchControl('dailyDigestEnabled', currentSettings.dailyDigestEnabled, '每日待办汇总：晚间汇总当天进度')}
+            ${switchControl('pomodoroRemindersEnabled', currentSettings.pomodoroRemindersEnabled, '番茄结束提醒：计时结束时推送消息')}
+          </div>
+          <div class="field-grid">
+            <label class="field">
+              <span>任务截止提醒时间</span>
+              <input class="input" type="time" name="taskReminderTime" value="${esc(currentSettings.taskReminderTime)}" />
+            </label>
+            <label class="field">
+              <span>每日打卡提醒时间</span>
+              <input class="input" type="time" name="dailyCheckinTime" value="${esc(currentSettings.dailyCheckinTime)}" />
+            </label>
+            <label class="field">
+              <span>每日待办汇总时间</span>
+              <input class="input" type="time" name="dailyDigestTime" value="${esc(currentSettings.dailyDigestTime)}" />
+            </label>
+            <label class="field">
+              <span>提醒时区</span>
+              <input class="input" type="text" name="reminderTimezone" value="${esc(currentSettings.reminderTimezone)}" placeholder="Asia/Shanghai" />
+            </label>
+          </div>
+          <div class="divider"></div>
+          <div class="switch-list">
+            ${switchControl('webhookEnabled', currentSettings.webhookEnabled, '同时推送到外部渠道（Bark / ntfy / Server酱 / 企业微信 / 钉钉 / 飞书）')}
+          </div>
+          <div class="field-grid">
+            <label class="field">
+              <span>推送渠道</span>
+              <select class="select" name="webhookType">${webhookOptions(currentSettings.webhookType)}</select>
+            </label>
+            <label class="field">
+              <span>Webhook 地址</span>
+              <input class="input" type="url" name="webhookUrl" value="${esc(currentSettings.webhookUrl)}" placeholder="https://..." />
+            </label>
+          </div>
+          <div class="setting-note">
+            <span class="settings-icon small">${icon('info', 16)}</span>
+            <p>飞牛系统通知中心暂未开放第三方写入，提醒会保存在应用内，并通过上面的渠道推送到手机。Bark 填 <code>https://api.day.app/&lt;key&gt;</code>，ntfy 填 <code>https://ntfy.sh/&lt;topic&gt;</code>，Server酱填 <code>https://sctapi.ftqq.com/&lt;key&gt;.send</code>，群机器人填完整 Webhook 地址。</p>
+          </div>
+          <div class="settings-actions">
+            <span class="hint">测试会使用已保存的配置；番茄提醒需要页面保持打开或由服务端在结束时间推送。</span>
+            <div class="settings-buttons">
+              <button type="button" class="btn btn-soft" id="test-webhook">发送测试提醒</button>
+              <button type="submit" class="btn btn-primary">保存提醒设置</button>
+            </div>
           </div>
         </form>
       </section>
@@ -199,6 +278,82 @@ export async function render(container) {
       form.elements.longBreakMinutes.value = currentSettings.longBreakMinutes;
       form.elements.longBreakInterval.value = currentSettings.longBreakInterval;
       form.elements.dailyGoalMinutes.value = currentSettings.dailyGoalMinutes;
+    } catch (error) {
+      toast(error.message, 'error');
+    } finally {
+      button.disabled = false;
+    }
+  });
+
+  const reminderForm = container.querySelector('#reminder-settings');
+  reminderForm.addEventListener('submit', async (event) => {
+    event.preventDefault();
+    const form = event.currentTarget;
+    const timePattern = /^([01]\d|2[0-3]):[0-5]\d$/;
+    for (const name of ['taskReminderTime', 'dailyCheckinTime', 'dailyDigestTime']) {
+      if (!timePattern.test(form.elements[name].value)) {
+        toast('请填写有效的提醒时间', 'error');
+        form.elements[name].focus();
+        return;
+      }
+    }
+    const timezone = form.elements.reminderTimezone.value.trim() || 'Asia/Shanghai';
+    try {
+      new Intl.DateTimeFormat('en-US', { timeZone: timezone });
+    } catch (_) {
+      toast('提醒时区无效，请填写 IANA 时区，例如 Asia/Shanghai', 'error');
+      form.elements.reminderTimezone.focus();
+      return;
+    }
+    const webhookEnabled = form.elements.webhookEnabled.checked;
+    const webhookUrl = form.elements.webhookUrl.value.trim();
+    if (webhookEnabled && !/^https?:\/\//i.test(webhookUrl)) {
+      toast('请填写以 http:// 或 https:// 开头的 Webhook 地址', 'error');
+      form.elements.webhookUrl.focus();
+      return;
+    }
+
+    const patch = {
+      remindersEnabled: form.elements.remindersEnabled.checked,
+      taskRemindersEnabled: form.elements.taskRemindersEnabled.checked,
+      dailyCheckinEnabled: form.elements.dailyCheckinEnabled.checked,
+      dailyDigestEnabled: form.elements.dailyDigestEnabled.checked,
+      pomodoroRemindersEnabled: form.elements.pomodoroRemindersEnabled.checked,
+      taskReminderTime: form.elements.taskReminderTime.value,
+      dailyCheckinTime: form.elements.dailyCheckinTime.value,
+      dailyDigestTime: form.elements.dailyDigestTime.value,
+      reminderTimezone: timezone,
+      webhookEnabled,
+      webhookType: form.elements.webhookType.value,
+      webhookUrl,
+    };
+    const button = form.querySelector('[type="submit"]');
+    button.disabled = true;
+    try {
+      const result = await api.patch('/api/settings', patch);
+      currentSettings = result.settings;
+      bus.emit('settings-changed', result.settings);
+      toast('提醒设置已保存', 'success');
+    } catch (error) {
+      toast(error.message, 'error');
+    } finally {
+      button.disabled = false;
+    }
+  });
+
+  container.querySelector('#test-webhook').addEventListener('click', async (event) => {
+    const button = event.currentTarget;
+    button.disabled = true;
+    try {
+      const result = await api.post('/api/notifications/test');
+      bus.emit('notifications-refresh', { announce: false });
+      if (result.webhook?.ok) {
+        toast('测试提醒已推送到外部渠道', 'success', 4000);
+      } else if (result.webhook?.skipped) {
+        toast('测试提醒已写入应用内（未启用外部推送）', 'info', 4000);
+      } else {
+        toast(`应用内提醒已创建，外部推送失败：${result.webhook?.error || '未知错误'}`, 'error', 6000);
+      }
     } catch (error) {
       toast(error.message, 'error');
     } finally {

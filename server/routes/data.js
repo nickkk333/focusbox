@@ -132,6 +132,8 @@ router.post('/import', (req, res) => {
       DELETE FROM tasks;
       DELETE FROM memos;
       DELETE FROM projects;
+      DELETE FROM notifications;
+      DELETE FROM timer_reminders;
     `);
 
     const insertProject = db.prepare('INSERT INTO projects (id, name, color, created_at) VALUES (?, ?, ?, ?)');
@@ -297,6 +299,8 @@ router.post('/reset', (req, res) => {
       DELETE FROM tasks;
       DELETE FROM memos;
       DELETE FROM projects;
+      DELETE FROM notifications;
+      DELETE FROM timer_reminders;
       DELETE FROM settings;
     `);
   });

@@ -7,6 +7,7 @@ import { toast } from './components.js';
 import { esc, todayStr, tzOffset, formatFocus } from './utils.js';
 import { startRouter } from './router.js';
 import { render as renderLogin } from './views/login.js';
+import { initNotifications, configureNotifications } from './notifications.js';
 
 const NAV_SECTIONS = [
   {
@@ -105,6 +106,20 @@ function shellHtml() {
           </div>
           <div class="topbar-actions">
             <span class="focus-pill" id="focus-pill" hidden></span>
+            <div class="notif-wrap">
+              <button type="button" class="btn btn-icon btn-ghost notif-btn" id="notif-btn" aria-label="消息提醒" aria-expanded="false">
+                ${icon('bell', 19)}
+                <span class="notif-dot" id="notif-dot" hidden></span>
+              </button>
+              <div class="notif-panel" id="notif-panel" hidden>
+                <div class="notif-head">
+                  <strong>消息提醒</strong>
+                  <button type="button" class="notif-readall" id="notif-readall">全部已读</button>
+                </div>
+                <div class="notif-list" id="notif-list"></div>
+                <div class="notif-foot">服务端定时提醒，可在设置中配置外部推送渠道</div>
+              </div>
+            </div>
             <button type="button" class="btn btn-icon btn-ghost" id="theme-btn" aria-label="切换主题"></button>
           </div>
         </header>
@@ -250,6 +265,8 @@ async function boot() {
   updateThemeButton();
   bindShell();
   subscribeTimer(renderMiniTimer);
+  configureNotifications(settings);
+  initNotifications();
   loadBadges();
   startRouter();
 
@@ -259,6 +276,7 @@ async function boot() {
     configureTimer(settings);
     applyTheme(settings.theme);
     updateThemeButton();
+    configureNotifications(settings);
   });
   bus.on('pomodoro-completed', (detail) => {
     if (detail.mode === 'focus') {
@@ -267,6 +285,8 @@ async function boot() {
       toast('休息结束，开始下一轮专注吧', 'success', 3200);
     }
     loadBadges();
+    // 番茄结束提醒由服务端异步写入，稍后再刷新铃铛。
+    setTimeout(() => bus.emit('notifications-refresh'), 1000);
   });
 
   onSystemThemeChange(() => {

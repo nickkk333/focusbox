@@ -7,6 +7,7 @@ const express = require('express');
 const { db, DB_FILE } = require('./db');
 const { seedIfNeeded } = require('./seed');
 const auth = require('./auth');
+const { startReminders, stopReminders } = require('./reminders');
 
 const app = express();
 const PORT = Number(process.env.PORT) || 3000;
@@ -48,6 +49,7 @@ app.use('/api/tasks', require('./routes/tasks'));
 app.use('/api/memos', require('./routes/memos'));
 app.use('/api', require('./routes/sessions'));
 app.use('/api/settings', require('./routes/settings'));
+app.use('/api/notifications', require('./routes/notifications'));
 app.use('/api/data', require('./routes/data'));
 
 app.use('/api', (req, res) => {
@@ -90,10 +92,12 @@ const server = app.listen(PORT, HOST, () => {
   console.log(`专注盒子已启动: http://${HOST}:${PORT}`);
   console.log(`数据库文件: ${DB_FILE}`);
   if (auth.AUTH_ENABLED) console.log(`已启用登录认证，用户名: ${auth.AUTH_USERNAME}`);
+  startReminders();
 });
 
 function shutdown(signal) {
   console.log(`\n收到 ${signal}，正在关闭服务…`);
+  stopReminders();
   server.close(() => {
     try {
       db.close();

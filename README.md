@@ -36,6 +36,15 @@
 - 计时状态写入 `localStorage`，刷新页面后可恢复
 - 完成或提前结束的专注会记录到服务端，并同步到任务与统计
 
+### 消息提醒
+- 应用内消息中心：右上角铃铛显示未读数，支持全部已读与单条删除
+- 任务截止提醒：每天汇总今天到期与已逾期的任务
+- 每日打卡提醒：提醒当天尚未打卡的每日任务
+- 每日待办汇总：晚间汇总待办数量、完成数与专注时长
+- 番茄结束提醒：计时结束时推送；页面关闭后由服务端按结束时间补发
+- 外部推送：Bark、ntfy、Server酱、企业微信群机器人、钉钉群机器人、飞书群机器人、自定义 Webhook
+- 提醒时间、时区与推送渠道均可在「设置 → 消息提醒」中调整
+
 ### 备忘
 - Markdown 渲染：标题、加粗、斜体、删除线、高亮、行内代码、代码块、引用、列表、任务列表、链接
 - `#标签` 自动提取与聚合
@@ -51,7 +60,8 @@
 
 ### 设置与数据
 - 主题：浅色 / 深色 / 跟随系统
-- 番茄钟参数与通知开关
+- 番茄钟参数与浏览器桌面通知开关
+- 消息提醒：任务截止、每日打卡、每日汇总、番茄结束，以及 Bark / ntfy / Server酱 / 企业微信 / 钉钉 / 飞书 / 自定义 Webhook 推送
 - JSON 全量导出 / 导入（备份格式 v2，包含任务类型与每日打卡记录；旧版备份可直接导入）
 - 一键恢复初始示例数据
 - 数据持久化到 Docker 卷
@@ -252,24 +262,28 @@ sudo chown -R 1000:1000 ./data
 │   ├── db.js                 # SQLite 表结构、设置与事务
 │   ├── seed.js               # 首次启动示例数据
 │   ├── utils.js              # 参数校验与数据映射
+│   ├── notify.js             # 应用内消息与外部 Webhook 推送
+│   ├── reminders.js          # 定时提醒调度与番茄结束提醒
 │   └── routes/
 │       ├── projects.js       # 项目
 │       ├── tasks.js          # 任务、子任务、时间记录
 │       ├── memos.js          # 备忘与标签
 │       ├── sessions.js       # 番茄记录、统计、徽标
 │       ├── settings.js       # 设置
+│       ├── notifications.js  # 消息列表、已读与测试推送
 │       └── data.js           # 导入、导出、重置
 └── public/
     ├── index.html
     ├── favicon.svg
     ├── css/
     │   ├── base.css          # 设计变量与通用组件
-    │   ├── layout.css        # 应用外壳与响应式布局
+    │   ├── layout.css        # 应用外壳、消息面板与响应式布局
     │   └── views.css         # 各业务视图
     └── js/
         ├── app.js            # 外壳、导航、主题、徽标
         ├── router.js         # Hash 路由
         ├── timer.js          # 番茄计时状态机
+        ├── notifications.js  # 消息铃铛与未读轮询
         ├── markdown.js       # 安全的 Markdown 渲染
         ├── components.js     # 弹窗、抽屉、Toast 等
         ├── api.js
@@ -304,6 +318,15 @@ sudo chown -R 1000:1000 ./data
 | DELETE | `/api/sessions/:id` | 删除番茄记录 |
 | GET | `/api/stats` | 统计，支持 `days`、`date`、`tzOffset` |
 | GET | `/api/badges` | 侧栏徽标与今日专注摘要 |
+| GET | `/api/notifications` | 提醒列表与未读数，支持 `limit`、`unread=1` |
+| GET | `/api/notifications/unread-count` | 未读提醒数 |
+| POST | `/api/notifications/:id/read` | 标记单条提醒已读 |
+| POST | `/api/notifications/read-all` | 全部标记已读 |
+| DELETE | `/api/notifications/:id` | 删除单条提醒 |
+| DELETE | `/api/notifications` | 清空提醒 |
+| POST | `/api/notifications/test` | 发送测试提醒（应用内 + 外部渠道） |
+| POST / DELETE | `/api/notifications/pomodoro/sync` | 同步 / 取消番茄结束提醒 |
+| POST | `/api/notifications/pomodoro/fire` | 立即触发番茄结束提醒 |
 | GET / PATCH | `/api/settings` | 读取 / 更新设置 |
 | GET | `/api/data/export` | 导出 JSON 备份 |
 | POST | `/api/data/import` | 导入 JSON 备份 |
@@ -313,7 +336,10 @@ sudo chown -R 1000:1000 ./data
 
 - **单用户、默认无登录**：这是面向个人自托管的工具，默认不包含账号体系。设置 `FOCUSBOX_USERNAME` 与 `FOCUSBOX_PASSWORD` 后会启用登录（飞牛安装包会自动设置）：浏览器登录页只需填写用户名和密码，退出登录后回到登录页即可更换账号。登录使用服务端会话（HttpOnly Cookie，30 天有效），登出会立即撤销会话；同时保留 HTTP Basic 校验以兼容旧版客户端与自动化脚本。请勿把未加保护的服务直接暴露到公网；如需远程访问，建议再放在带 HTTPS 的反向代理（如 Nginx、Caddy、Authelia）之后。
 - **计时在浏览器端运行**：刷新页面后通过 `localStorage` 恢复；关闭所有页面后计时不会在后台继续。专注完成后由浏览器向服务端写入记录。
-- **时区**：统计接口接收浏览器传入的 `tzOffset`，按本地日期聚合数据，避免跨时区导致「今天」错位。
+- **服务端提醒**：`reminders.js` 每 20 秒检查一次，按「设置 → 消息提醒」中的时区判断是否到达提醒时间；同一提醒通过 `dedupe_key` 去重，应用内最多保留最近 500 条。
+- **番茄结束提醒**：浏览器启动计时后把结束时间同步到服务端，暂停、重置或切换模式会取消；页面关闭时服务端仍会在结束时间推送。
+- **飞牛系统通知**：fnOS 暂未开放第三方应用写入系统通知中心。FocusBox 的提醒保存在应用内铃铛中，并通过 Bark、ntfy、Server酱、企业微信、钉钉、飞书或自定义 Webhook 推送到手机。
+- **时区**：统计接口接收浏览器传入的 `tzOffset`，按本地日期聚合数据，避免跨时区导致「今天」错位；服务端提醒使用设置中的 `reminderTimezone`，默认 `Asia/Shanghai`。
 - **静态资源缓存**：服务端对静态文件使用 `no-cache` + ETag 协商缓存，升级镜像后刷新页面即可拿到新版本。
 
 ## 常见问题
@@ -326,6 +352,12 @@ sudo chown -R 1000:1000 ./data
 
 **Q：桌面通知没有出现？**  
 浏览器通知通常要求 HTTPS 或 `localhost` 环境，并且需要用户授权。首次开启时请允许通知权限。
+
+**Q：收不到任务到期、打卡或每日汇总提醒？**
+先确认「设置 → 消息提醒」中已启用对应开关，并检查提醒时间与提醒时区是否正确。服务端每 20 秒检查一次，提醒最多延迟约 20 秒。外部推送需要在同一页面填写 Webhook 地址并点击「发送测试提醒」验证。
+
+**Q：为什么提醒没有出现在飞牛系统通知里？**
+飞牛 fnOS 目前没有开放第三方应用写入系统通知中心的接口。FocusBox 使用应用内消息铃铛，并可转发到 Bark、ntfy、Server酱、企业微信、钉钉、飞书或自定义 Webhook。
 
 **Q：如何升级？**
 
